@@ -16,11 +16,12 @@ This is a **separate repo** from FlyTab. It shares no code with FlyTab but refer
 ### Data Flow
 ```
 FlyTab (Android tablet)
-  └─ FlightUpload (SFTP) ──▶ ~/flights/YYYYMMDD_DEP-DEST.csv  (home machine)
+  └─ FlightUpload (SFTP) ──▶ ~/flights/YYYYMMDD_DEP-DEST.csv             (home machine)
+                         ──▶ ~/flights/YYYYMMDD_DEP-DEST_traffic.ndjson  (companion, when present)
                                   │
 debrief-server.py (:8092) ──reads─┘
-  │  GET /api/flights          list CSV files in ~/flights
-  │  GET /api/flights/{name}   stream a specific CSV
+  │  GET /api/flights          list {name, hasTraffic} objects from ~/flights, newest first
+  │  GET /api/flights/{name}   stream a specific CSV or _traffic.ndjson
   │  POST /api/claude          proxy to Claude API (API key server-side)
   │  POST /api/winds           fetch + cache winds aloft from AWC
   │  POST /api/metar           fetch + cache historical METARs from AWC
@@ -33,7 +34,12 @@ debrief-server.py (:8092) ──reads─┘
 - URL with flight pre-selected: `http://<host>:8092/?file=YYYYMMDD_DEP-DEST.csv`
 
 ### FlyTab Integration
-The only change to the FlyTab repo is a `DEBRIEF` button per logbook entry in `web/cockpit/logbook.js`. It opens the debrief URL in the system browser. The base URL is configured via a new `debriefServer.base` key in `web/cockpit-config.json`. Button is grayed out if `GET /api/flights` returns an error (server not reachable).
+
+**Logbook DEBRIEF button** (`web/cockpit/logbook.js`): Opens debrief URL in the system browser with `?file=` parameter. Base URL from new `debriefServer.base` key in `web/cockpit-config.json`. Button grayed out if server unreachable.
+
+**ADS-B Traffic Recording** (`web/cockpit/flight-recorder.js`): New 5-second interval snapshots `stratuxClient.traffic` and appends one NDJSON line to a companion file `YYYYMMDD_DEP-DEST_traffic.ndjson` in `/flights/` via NanoHTTPD PUT+append. Fields per target: `icao`, `callsign`, `lat`, `lon`, `altFt`, `speedKts`, `heading`, `squawk`. File renamed in sync with CSV on stop.
+
+**FlightUpload** (`web/cockpit/flight-upload.js`): Uploads `_traffic.ndjson` alongside each CSV. If traffic file is absent (older recordings), CSV-only upload proceeds normally.
 
 ## Key Files
 
@@ -42,9 +48,11 @@ The only change to the FlyTab repo is a `DEBRIEF` button per logbook entry in `w
 | `index.html` | Single-page entry point |
 | `js/app.js` | Main controller — wires all modules |
 | `js/csv-parser.js` | Parses 1Hz CSV → FlightData typed arrays |
+| `js/traffic-parser.js` | Parses `_traffic.ndjson` → TrafficData, computes proximity events |
 | `js/flight-physics.js` | Wind triangle TAS, density correction IAS, DMMS calculation |
 | `js/scorer.js` | Rule-based scoring engine — engine mgmt + airmanship + approach |
-| `js/replay.js` | Map replay controller — Leaflet marker, scrubber, playback |
+| `js/event-detector.js` | Scans FlightData + TrafficData → Event array |
+| `js/replay.js` | Map replay — Leaflet own-ship marker, traffic markers, scrubber, playback |
 | `js/charts.js` | Chart.js time-series panels (altitude/speed, EGT, CHT, ML, fuel) |
 | `js/claude-review.js` | Builds condensed payload, calls /api/claude, renders narrative |
 | `js/oooi.js` | Derives Out/Off/On/In timestamps from CSV data |
@@ -73,6 +81,35 @@ Column index references (0-based):
 - `Operating_Condition` = 38 (ROP / LOP / empty)
 - `ml_phase` = 41 (ground / climb / cruise / descent / approach / landing)
 - `ml_score` = 42, `ml_anomaly` = 43
+
+## Traffic NDJSON Format
+
+Companion file `YYYYMMDD_DEP-DEST_traffic.ndjson` in `~/flights/`. One line per 5-second snapshot. `t` = seconds from flight start.
+
+```
+{"t":0,"targets":[{"icao":"A12345","cs":"AAL123","lat":35.12,"lon":-80.23,"altFt":8500,"spdKts":240,"hdg":185,"squawk":"3421"}]}
+{"t":5,"targets":[...]}
+```
+
+**Size estimate:** 2h flight × 720 snapshots × 25 targets × ~90 bytes ≈ 1.6 MB.
+
+**Absent for older recordings** — all code paths that consume TrafficData must handle `null` gracefully. Traffic features are silently hidden when the file is not present.
+
+### Proximity Analysis (js/traffic-parser.js)
+
+For each traffic snapshot, compute separation from own-ship at the nearest matching CSV row (round `tSec` to nearest integer → CSV row index):
+
+```javascript
+horizNm = haversineNm(ownLat, ownLon, target.lat, target.lon)
+vertFt  = Math.abs(ownAltFt - target.altFt)
+```
+
+Flag `TRAFFIC_PROXIMITY` event when `horizNm < 3 && vertFt < 1000`. Record the closest approach across the entire flight as a single `closestTraffic` scalar for the AI review payload.
+
+Traffic marker altitude coloring on map:
+- `vertFt < 1000`: **amber** (same altitude band — highest awareness)
+- `target.altFt > ownAltFt + 1000`: **blue** (above)
+- `target.altFt < ownAltFt - 1000`: **grey** (below)
 
 ## Aircraft Data
 

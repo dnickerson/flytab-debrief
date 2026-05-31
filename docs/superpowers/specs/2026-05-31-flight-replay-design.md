@@ -20,7 +20,7 @@ A standalone post-flight debrief web application that reads 1Hz CSV flight recor
 ### Non-goals
 - In-flight use (this is a post-flight ground tool only)
 - Cloud hosting in this phase (local-only, Tailscale for remote access)
-- ADS-B traffic replay (traffic not recorded in CSV)
+- ADS-B traffic replay in this phase requires a FlyTab recording enhancement (see Section 2 FlyTab Integration)
 - 3D synthetic vision replay
 
 ---
@@ -41,8 +41,8 @@ FlyTab tablet
   └─ FlightUpload (SFTP) ──▶ ~/flights/YYYYMMDD_DEP-DEST.csv
                                    │
 debrief-server.py (:8092) ──reads──┘
-  ├─ GET  /api/flights              list CSV files
-  ├─ GET  /api/flights/{name}       stream CSV
+  ├─ GET  /api/flights              list CSV files (and companion _traffic.ndjson files)
+  ├─ GET  /api/flights/{name}       stream CSV or _traffic.ndjson
   ├─ POST /api/claude               Claude API proxy (API key server-side)
   ├─ POST /api/winds                AWC windtemp fetch + SQLite cache
   ├─ POST /api/metar                AWC historical METAR fetch + SQLite cache
@@ -54,11 +54,25 @@ debrief-server.py (:8092) ──reads──┘
 - Tailscale: `http://<tailscale-ip>:8092`
 - Pre-loaded flight: `http://<host>:8092/?file=YYYYMMDD_DEP-DEST.csv`
 
-### FlyTab Integration (only change to FlyTab repo)
-- New `DEBRIEF` button per logbook entry in `web/cockpit/logbook.js`
+### FlyTab Integration
+
+**Logbook DEBRIEF button** (UI change, `web/cockpit/logbook.js`):
+- New `DEBRIEF` button per logbook entry
 - Opens debrief URL in system browser with `?file=` parameter
 - Base URL from new `debriefServer.base` key in `web/cockpit-config.json`
 - Button grayed out if server unreachable (timeout on `GET /api/flights`)
+
+**ADS-B Traffic Recording** (`web/cockpit/flight-recorder.js`):
+- New 5-second interval alongside the existing 1Hz engine CSV loop
+- Each tick snapshots `stratuxClient.traffic` (array of live Stratux traffic objects)
+- Writes one NDJSON line per tick to a companion file: `YYYYMMDD_DEP-DEST_traffic.ndjson`
+- Flushed to NanoHTTPD at `/flights/{name}_traffic.ndjson` via the same PUT+append mechanism as the CSV
+- File renamed in sync with the CSV dep/dest rename on stop
+- Fields recorded per target: `icao`, `callsign`, `lat`, `lon`, `altFt`, `speedKts`, `heading`, `squawk`
+
+**FlightUpload** (`web/cockpit/flight-upload.js`):
+- Uploads `_traffic.ndjson` companion file alongside each CSV when present
+- Listed and uploaded as a pair; if the traffic file is missing (older recordings), upload proceeds with CSV only
 
 ---
 
@@ -153,6 +167,55 @@ debrief-server.py (:8092) ──reads──┘
   windsAloft: object,       // raw AWC response, cached
 }
 ```
+
+### TrafficData Object (loaded in parallel with FlightData, optional)
+
+Parsed from `YYYYMMDD_DEP-DEST_traffic.ndjson`. Absent for flights recorded before the traffic recording enhancement.
+
+```javascript
+{
+  snapshots: [
+    {
+      tSec: number,          // seconds from flight start (matches FlightData.time axis)
+      targets: [
+        {
+          icao: string,      // 6-char hex ICAO address
+          callsign: string,  // ATC callsign or registration, may be empty
+          lat: number,
+          lon: number,
+          altFt: number,     // pressure altitude
+          speedKts: number,
+          heading: number,   // degrees true
+          squawk: string,    // 4-digit octal
+        }
+      ]
+    }
+  ],
+
+  // Precomputed proximity events (own-ship vs. each target at each snapshot)
+  proximityEvents: [
+    {
+      tSec: number,
+      icao: string,
+      callsign: string,
+      horizNm: number,       // horizontal separation in nm
+      vertFt: number,        // vertical separation in feet (absolute)
+      relAlt: 'above' | 'below' | 'level',  // relative to own-ship
+    }
+  ]
+}
+```
+
+### Traffic NDJSON Format
+
+One line per 5-second snapshot. `t` is seconds from flight start (epoch-aligned to CSV first row).
+
+```
+{"t":0,"targets":[{"icao":"A12345","cs":"AAL123","lat":35.12,"lon":-80.23,"altFt":8500,"spdKts":240,"hdg":185,"squawk":"3421"},...]}
+{"t":5,"targets":[...]}
+```
+
+**File size estimate:** 2h flight × 720 snapshots × 25 targets × ~90 bytes ≈ 1.6 MB. Acceptable for SFTP upload and local storage.
 
 ---
 
@@ -276,6 +339,7 @@ Events appear as colored ticks on the scrubber bar and as rows in the event list
 | `BANK_EXCEEDANCE` | 🟠 Orange | \|bank\| > 45° in cruise |
 | `SPEED_EXCEEDANCE` | 🔴 Red | Estimated IAS > Vno |
 | `SINK_RATE_HIGH` | 🟠 Orange | Sink rate > 1,500 fpm sustained 10s in descent |
+| `TRAFFIC_PROXIMITY` | 🟠 Orange | Any traffic within 3 nm horizontal AND 1,000 ft vertical simultaneously |
 
 ---
 
@@ -316,6 +380,8 @@ Events appear as colored ticks on the scrubber bar and as rows in the event list
 - Aircraft marker (triangle) moves with scrubber
 - Phase boundary dots on track (colored by phase type)
 - Tap any track point to jump scrubber to that time
+- **Traffic markers** (when `_traffic.ndjson` present): small airplane icons at their interpolated positions for the current scrubber time. Color by relative altitude — amber = within 1,000 ft of own-ship, blue = above, grey = below. Tap a traffic target to show popup: callsign, altitude, speed, squawk, horizontal separation from own-ship.
+- Traffic toggle: `[TRAFFIC ON/OFF]` pill — default on when file is present
 
 ### Scorecard Panel (top-right, collapsible)
 - Overall score with color-coded bar
@@ -401,7 +467,8 @@ If AWC is unreachable or returns no data for the flight time, TAS/IAS are omitte
   },
   "dmmsViolations": 0,
   "redBoxSeconds": 0,
-  "carbIceSeconds": 0
+  "carbIceSeconds": 0,
+  "closestTraffic": { "callsign": "AAL123", "horizNm": 2.1, "vertFt": 800, "timeMin": 42 }
 }
 ```
 
@@ -418,7 +485,7 @@ Natural-language narrative displayed in the AI Review panel. Saved to `{filename
 ### Future: Training Dataset Export
 Each scored flight automatically appends a compact JSON record to `~/.flytab-debrief/training-log.jsonl`:
 ```json
-{ "date": "2026-05-11", "route": "KLKR-KGSP", "scores": {...}, "phaseStats": {...}, "eventCounts": {...} }
+{ "date": "2026-05-11", "route": "KLKR-KGSP", "scores": {...}, "phaseStats": {...}, "eventCounts": {...}, "trafficProximityEvents": 0, "closestTrafficNm": 2.1 }
 ```
 This accumulates over time as a training dataset for future model development.
 
@@ -428,8 +495,9 @@ This accumulates over time as a training dataset for future model development.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/flights` | JSON array of filenames in `~/flights`, newest first |
+| GET | `/api/flights` | JSON array of `{name, hasTraffic}` objects, newest first |
 | GET | `/api/flights/{name}` | Stream CSV file content |
+| GET | `/api/flights/{name}_traffic.ndjson` | Stream companion traffic NDJSON file |
 | GET | `/api/health` | `{"ok": true}` — used by FlyTab for reachability check |
 | POST | `/api/claude` | Body: `{payload: object}`. Proxies to Claude API. Returns `{narrative: string}` |
 | POST | `/api/winds` | Body: `{lat, lon, altFt, utc}`. Returns interpolated wind vector + temp |
@@ -453,8 +521,9 @@ flytab-debrief/
 │   ├── oooi.js                  Derive Out/Off/On/In from CSV + field elevations
 │   ├── flight-physics.js        Wind triangle TAS, density IAS, DMMS
 │   ├── scorer.js                Rule-based scoring — all three categories
-│   ├── event-detector.js        Scan FlightData → array of Event objects
-│   ├── replay.js                Leaflet map replay, scrubber, playback
+│   ├── event-detector.js        Scan FlightData + TrafficData → array of Event objects
+│   ├── traffic-parser.js        Parse _traffic.ndjson → TrafficData, compute proximity events
+│   ├── replay.js                Leaflet map replay, scrubber, playback, traffic markers
 │   ├── charts.js                Chart.js time-series panels
 │   ├── claude-review.js         Build payload, call /api/claude, render
 │   └── gpx-export.js            GPX 1.1 export from FlightData
