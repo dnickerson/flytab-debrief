@@ -136,12 +136,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def _proxy_claude(self):
         api_key = os.environ.get('ANTHROPIC_API_KEY', '')
+        is_oauth = False
         if not api_key:
             # Fall back to Claude Code's OAuth token when on the home server
             creds = Path.home() / '.claude' / '.credentials.json'
             if creds.exists():
                 try:
                     api_key = json.loads(creds.read_text())['claudeAiOauth']['accessToken']
+                    is_oauth = True
                 except (KeyError, json.JSONDecodeError):
                     pass
         if not api_key:
@@ -160,10 +162,13 @@ class Handler(BaseHTTPRequestHandler):
                         "cache_control": {"type": "ephemeral"}}],
             "messages": [{"role": "user", "content": json.dumps(payload)}]
         }).encode()
+        # OAuth tokens use Authorization: Bearer; regular API keys use x-api-key
+        auth_headers = ({'Authorization': f'Bearer {api_key}'} if is_oauth
+                        else {'x-api-key': api_key})
         req = urllib.request.Request(
             'https://api.anthropic.com/v1/messages', data=req_body,
             headers={'Content-Type': 'application/json',
-                     'x-api-key': api_key,
+                     **auth_headers,
                      'anthropic-version': '2023-06-01',
                      'anthropic-beta': 'prompt-caching-2024-07-31'})
         try:
