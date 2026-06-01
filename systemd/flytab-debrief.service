@@ -1,0 +1,16 @@
+[Unit]
+Description=FlyTab Debrief Server
+After=network.target
+
+[Service]
+Type=simple
+User=dananickerson
+WorkingDirectory=/home/dananickerson/flytab-debrief
+ExecStart=/usr/bin/python3 /home/dananickerson/flytab-debrief/server/debrief-server.py
+Restart=on-failure
+RestartSec=5
+Environment=FLIGHTS_DIR=/home/dananickerson/flights
+Environment=DEBRIEF_PORT=8092
+
+[Install]
+WantedBy=multi-user.target
