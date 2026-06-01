@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FlyTab Debrief</title>
+  <link rel="stylesheet" href="lib/leaflet.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- Flight selector overlay (shown on load when no ?file= param) -->
+  <div id="flight-selector" class="selector-overlay">
+    <div class="selector-panel">
+      <h1 class="selector-title">FlyTab Debrief</h1>
+      <div id="flight-list" class="flight-list">Loading…</div>
+    </div>
+  </div>
+
+  <!-- Main debrief layout (hidden until flight loaded) -->
+  <div id="debrief-root" class="debrief-root hidden">
+
+    <!-- Header -->
+    <header id="debrief-header" class="debrief-header"></header>
+
+    <!-- Body: map left, data right -->
+    <div class="debrief-body">
+      <div id="map-panel" class="map-panel">
+        <div id="map" class="leaflet-map"></div>
+        <div class="map-color-pills">
+          <button class="color-pill active" data-channel="ml">ML SCORE</button>
+          <button class="color-pill" data-channel="cht">CHT</button>
+          <button class="color-pill" data-channel="alt">ALT</button>
+          <button class="color-pill" data-channel="speed">SPEED</button>
+        </div>
+        <button id="traffic-toggle" class="traffic-toggle hidden">TRAFFIC ON</button>
+      </div>
+
+      <div class="data-panel">
+        <!-- Scorecard -->
+        <div id="scorecard" class="scorecard"></div>
+        <!-- Charts -->
+        <div class="charts-panel">
+          <div class="chart-tabs">
+            <button class="chart-tab active" data-tab="altspeed">Alt/Speed</button>
+            <button class="chart-tab" data-tab="egt">EGT</button>
+            <button class="chart-tab" data-tab="cht">CHT</button>
+            <button class="chart-tab" data-tab="ml">ML</button>
+            <button class="chart-tab" data-tab="fuel">Fuel</button>
+          </div>
+          <div id="chart-container" class="chart-container">
+            <canvas id="chart-canvas"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scrubber / playback bar -->
+    <div class="playback-bar">
+      <button id="play-btn" class="play-btn">▶</button>
+      <div class="scrubber-wrap">
+        <div id="event-ticks" class="event-ticks"></div>
+        <input id="scrubber" type="range" min="0" max="100" value="0" class="scrubber">
+      </div>
+      <div class="speed-btns">
+        <button class="speed-btn active" data-speed="1">1×</button>
+        <button class="speed-btn" data-speed="2">2×</button>
+        <button class="speed-btn" data-speed="5">5×</button>
+        <button class="speed-btn" data-speed="10">10×</button>
+      </div>
+      <span id="time-display" class="time-display">--:--:--Z</span>
+      <button id="event-list-btn" class="event-list-btn">EVENTS</button>
+    </div>
+
+    <!-- Event list panel -->
+    <div id="event-panel" class="event-panel hidden"></div>
+
+    <!-- AI review panel -->
+    <div id="ai-panel" class="ai-panel hidden"></div>
+
+    <!-- Notes modal -->
+    <div id="notes-modal" class="notes-modal hidden">
+      <div class="notes-inner">
+        <h3>Flight Notes</h3>
+        <textarea id="notes-text" rows="8"></textarea>
+        <div class="notes-actions">
+          <button id="notes-save">SAVE</button>
+          <button id="notes-close">CLOSE</button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /debrief-root -->
+
+  <!-- Load order: libs → logic modules → UI modules → app -->
+  <script src="lib/leaflet.js"></script>
+  <script src="lib/chart.umd.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
