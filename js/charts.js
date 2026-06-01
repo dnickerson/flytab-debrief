@@ -27,9 +27,25 @@ export function initCharts(fd) {
 
 function _renderChart() {
     if (_chart) { _chart.destroy(); _chart = null; }
-    const canvas = document.getElementById('chart-canvas');
-    const labels = Array.from({ length: _fd.rows }, (_, i) => i);
+    const container = document.getElementById('chart-container');
+    const canvas    = document.getElementById('chart-canvas');
 
+    if (!canvas || !container) {
+        console.error('chart-canvas or chart-container not found');
+        return;
+    }
+
+    // Ensure container has a usable height — flex:1 1 0 sometimes computes 0
+    // until the browser paints. Force an explicit pixel height from the container.
+    const h = container.clientHeight;
+    const w = container.clientWidth;
+    if (h < 10 || w < 10) {
+        // Container not yet laid out — retry after next paint
+        requestAnimationFrame(() => _renderChart());
+        return;
+    }
+
+    const labels = Array.from({ length: _fd.rows }, (_, i) => i);
     const configs = {
         altspeed: _altSpeedConfig(labels),
         egt:      _egtConfig(labels),
@@ -37,7 +53,13 @@ function _renderChart() {
         ml:       _mlConfig(labels),
         fuel:     _fuelConfig(labels),
     };
-    _chart = new Chart(canvas, configs[_activeTab]);
+
+    try {
+        _chart = new Chart(canvas, configs[_activeTab]);
+    } catch (e) {
+        container.innerHTML = `<p style="color:var(--color-danger);padding:8px;font-size:0.8rem">Chart error: ${e.message}</p>`;
+        console.error('Chart.js error:', e);
+    }
 }
 
 function _base(labels, datasets) {
