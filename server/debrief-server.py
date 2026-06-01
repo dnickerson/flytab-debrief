@@ -137,7 +137,15 @@ class Handler(BaseHTTPRequestHandler):
     def _proxy_claude(self):
         api_key = os.environ.get('ANTHROPIC_API_KEY', '')
         if not api_key:
-            return self._json({'error': 'ANTHROPIC_API_KEY not set'}, 500)
+            # Fall back to Claude Code's OAuth token when on the home server
+            creds = Path.home() / '.claude' / '.credentials.json'
+            if creds.exists():
+                try:
+                    api_key = json.loads(creds.read_text())['claudeAiOauth']['accessToken']
+                except (KeyError, json.JSONDecodeError):
+                    pass
+        if not api_key:
+            return self._json({'error': 'No API key: set ANTHROPIC_API_KEY or log in to Claude Code'}, 500)
         body = self._read_body()
         payload = body.get('payload', {})
         system = ("You are an experienced CFI and A&P mechanic reviewing a post-flight data debrief "
