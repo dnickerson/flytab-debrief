@@ -450,7 +450,9 @@ git commit -m "feat(server): HTTP server with file API, notes, review, external 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-export FLIGHTS_DIR="${FLIGHTS_DIR:-$HOME/flights}"
+# Dev default: ~/engine_analysis (120+ real FlyTab CSVs)
+# Production: set FLIGHTS_DIR=~/flights or rely on systemd Environment=
+export FLIGHTS_DIR="${FLIGHTS_DIR:-$HOME/engine_analysis}"
 export DEBRIEF_PORT="${DEBRIEF_PORT:-8092}"
 cd "$(dirname "$0")"
 python3 server/debrief-server.py
@@ -516,7 +518,7 @@ git commit -m "feat(server): systemd service and start script"
 ```javascript
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
-import { parseCSV, haversineNm, segmentPhases } from '../js/csv-parser.js';
+import { parseCSV, haversineNm, segmentPhases, to24hUTC } from '../js/csv-parser.js';
 
 const SAMPLE = readFileSync('tests/fixtures/sample.csv', 'utf8');
 
@@ -575,6 +577,32 @@ describe('parseCSV', () => {
         const fd = parseCSV(SAMPLE);
         expect(fd.totalDistanceNm).toBeGreaterThan(0);
     });
+
+    it('parses startUtc as a valid Date from date+time_z columns', () => {
+        const fd = parseCSV(SAMPLE);
+        expect(fd.startUtc).toBeInstanceOf(Date);
+        expect(isNaN(fd.startUtc.getTime())).toBe(false);
+        // sample.csv first row date=2026-05-11, time_z=12:00:00 PM → 2026-05-11T12:00:00Z
+        expect(fd.startUtc.toISOString()).toBe('2026-05-11T12:00:00.000Z');
+    });
+});
+
+describe('to24hUTC', () => {
+    it('converts PM time correctly', () => {
+        expect(to24hUTC('1:32:53 PM')).toBe('13:32:53');
+    });
+
+    it('converts 12:00 PM (noon) correctly', () => {
+        expect(to24hUTC('12:00:00 PM')).toBe('12:00:00');
+    });
+
+    it('converts 12:00 AM (midnight) correctly', () => {
+        expect(to24hUTC('12:00:00 AM')).toBe('00:00:00');
+    });
+
+    it('converts AM time correctly', () => {
+        expect(to24hUTC('9:05:30 AM')).toBe('09:05:30');
+    });
 });
 
 describe('segmentPhases', () => {
@@ -620,11 +648,23 @@ export const CSV_COLS = {
     OIL_TEMP: 2, OIL_PRESS: 3, RPM: 7, FUEL_FLOW: 8, GAL_REM: 9,
     CARB_TEMP: 12, EGT1: 16, EGT2: 17, EGT3: 18, EGT4: 19,
     CHT1: 20, CHT2: 21, CHT3: 22, CHT4: 23,
+    DATE: 24, TIME_Z: 25,
     LON: 26, LAT: 27, ALT_FT: 28, SPEED_KTS: 29,
     BANK: 30, PITCH: 31, COURSE: 33,
     PCT_POWER: 37, OP_COND: 38, PCT_FROM_PEAK: 39, SFC: 40,
     ML_PHASE: 41, ML_SCORE: 42, ML_ANOMALY: 43,
 };
+
+// Convert 12-hour Zulu time string "1:32:53 PM" → "13:32:53"
+export function to24hUTC(timeStr) {
+    const m = timeStr.trim().match(/^(\d+):(\d+):(\d+)\s*(AM|PM)$/i);
+    if (!m) return timeStr;
+    let h = parseInt(m[1]);
+    const min = m[2], sec = m[3], ampm = m[4].toUpperCase();
+    if (ampm === 'PM' && h !== 12) h += 12;
+    if (ampm === 'AM' && h === 12) h = 0;
+    return `${String(h).padStart(2,'0')}:${min}:${sec}`;
+}
 
 export function parseCSV(text) {
     const lines = text.trim().split('\n');
@@ -689,6 +729,16 @@ export function parseCSV(text) {
         totalFF += fd.fuelFlow[i];
     }
 
+    // Parse startUtc from first data row (date col 24 + time_z col 25)
+    try {
+        const first = data[0].split(',');
+        const dateStr = (first[C.DATE] || '').trim();       // "2026-04-12"
+        const timeStr = (first[C.TIME_Z] || '').trim();     // "1:32:53 PM" (Zulu)
+        if (dateStr && timeStr) {
+            fd.startUtc = new Date(`${dateStr}T${to24hUTC(timeStr)}Z`);
+        }
+    } catch (_) {}
+
     fd.maxCht = maxCht;
     fd.maxEgt = maxEgt;
     fd.avgFuelFlow    = n > 0 ? totalFF / n : 0;
@@ -737,13 +787,13 @@ export function computeDistanceNm(lat, lon) {
 npm test
 ```
 
-Expected: `12 passed`
+Expected: `18 passed`
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add js/csv-parser.js tests/csv-parser.test.js
-git commit -m "feat(parser): CSV → FlightData typed arrays, phase segmentation, haversine"
+git commit -m "feat(parser): CSV → FlightData typed arrays, startUtc parsing, phase segmentation, haversine"
 ```
 
 ---
@@ -2525,9 +2575,16 @@ export function initReplay(fd, trafficData, events) {
 
     if (!_map) {
         _map = L.map('map', { zoomControl: true });
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        // Primary: sectional tiles from FlyTab home server (same source as FlyTab cockpit)
+        // Fallback: OSM when home server unreachable
+        const sectional = L.tileLayer('http://192.168.1.77:8090/tiles/sectional/{z}/{x}/{y}.png', {
+            maxZoom: 12, attribution: 'FAA Sectional',
+        });
+        const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '© OpenStreetMap', maxZoom: 18,
-        }).addTo(_map);
+        });
+        sectional.addTo(_map);
+        sectional.on('tileerror', () => { sectional.remove(); osm.addTo(_map); });
     } else {
         _map.eachLayer(l => { if (!(l instanceof L.TileLayer)) _map.removeLayer(l); });
     }
@@ -2552,20 +2609,23 @@ function _renderTrack() {
 }
 
 function _colorTrack() {
-    if (!_polyline) return;
-    const pts = [];
-    for (let i = 0; i < _fd.rows; i++) {
-        if (!_fd.lat[i] || !_fd.lon[i]) continue;
-        const val = _channelValue(i);
-        pts.push({ latlng: [_fd.lat[i], _fd.lon[i]], color: _valueColor(val, _colorChannel) });
+    if (_polyline) { _map.removeLayer(_polyline); _polyline = null; }
+    const group = L.layerGroup().addTo(_map);
+
+    // Render one polyline per phase segment (max ~10 segments per flight).
+    // Per-point polylines (4000+ layers) cause severe Leaflet performance degradation.
+    for (const seg of _fd.phases) {
+        const pts = [];
+        for (let i = seg.startIdx; i <= seg.endIdx; i++) {
+            if (_fd.lat[i] && _fd.lon[i]) pts.push([_fd.lat[i], _fd.lon[i]]);
+        }
+        if (pts.length < 2) continue;
+        // Color by the midpoint value of the segment
+        const mid = Math.round((seg.startIdx + seg.endIdx) / 2);
+        const color = _valueColor(_channelValue(mid));
+        L.polyline(pts, { color, weight: 3, opacity: 0.85 }).addTo(group);
     }
-    // Re-draw as colored segments
-    if (_polyline) _map.removeLayer(_polyline);
-    const segments = L.layerGroup().addTo(_map);
-    for (let i = 1; i < pts.length; i++) {
-        L.polyline([pts[i-1].latlng, pts[i].latlng], { color: pts[i].color, weight: 3 }).addTo(segments);
-    }
-    _polyline = segments;
+    _polyline = group;
 }
 
 function _channelValue(i) {
