@@ -77,7 +77,7 @@ function _buildPayload(fd, scores, events, trafficData) {
 
     return {
         flight:   `${fd.depIcao || '?'}→${fd.destIcao || '?'}`,
-        date:     new Date().toISOString().slice(0, 10),
+        date:     fd.startUtc ? fd.startUtc.toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
         aircraft: 'RV-9A N194JT, Lycoming O-360 A1A',
         oooi:     { outZ: fmt(o.out), offZ: fmt(o.off), onZ: fmt(o.on), inZ: fmt(o.in) },
         duration: { blockMin: Math.round(fd.blockMinutes), airMin: Math.round(fd.airMinutes),

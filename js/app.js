@@ -7,6 +7,7 @@ import { detectEvents }           from './event-detector.js';
 import { initReplay }             from './replay.js';
 import { initCharts }             from './charts.js';
 import { initClaudeReview }       from './claude-review.js';
+import { applyAirspeeds }          from './flight-physics.js';
 
 const API = '';  // relative — same origin as server
 
@@ -57,6 +58,15 @@ async function openFlight(filename) {
     fd.oooi = detectOOOI(fd);
     fd.blockMinutes = fd.oooi.blockMinutes;
     fd.airMinutes   = fd.oooi.airMinutes;
+
+    // Estimate IAS using ISA atmosphere (0 wind + standard temp lapse rate).
+    // Enables DMMS violation detection and speed discipline scoring.
+    // AWC winds can refine this later via applyAirspeeds with real wind data.
+    const isoWinds = Array.from({ length: fd.rows }, (_, i) => ({
+        windSpeed: 0, windDir: 0,
+        tempC: 15 - fd.altFt[i] * 0.002,
+    }));
+    applyAirspeeds(fd, isoWinds, new Float32Array(fd.rows).fill(29.92));
 
     fetchMETARs(fd);
 
@@ -294,7 +304,7 @@ async function exportGPX(fd) {
 
 function appendTrainingLog(filename, scores, events, trafficData) {
     const entry = {
-        date: new Date().toISOString().slice(0, 10),
+        date: fd.startUtc ? fd.startUtc.toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
         route: filename.replace(/\.csv$/, ''),
         scores: { overall: scores.overall, engineMgmt: scores.engineMgmt.overall,
                   airmanship: scores.airmanship.overall, approach: scores.approach?.overall ?? null },
