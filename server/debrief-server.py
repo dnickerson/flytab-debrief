@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """flytab-debrief server — port 8092, 0.0.0.0"""
 import json, mimetypes, os, re, urllib.request
+from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
@@ -125,12 +126,42 @@ class Handler(BaseHTTPRequestHandler):
     def _proxy_metar(self):
         body = self._read_body()
         icao = body.get('icao', '')
+        utc  = body.get('utc', '')   # ISO8601 flight event time (Off or On)
         if not re.fullmatch(r'[A-Z0-9]{3,4}', icao):
             return self._json({'error': 'invalid icao'}, 400)
-        url = f'https://aviationweather.gov/api/data/metar?ids={icao}&format=raw&taf=false'
+
+        # Compute how many hours back we need to reach the flight time
+        flight_dt = None
+        hours_back = 3
+        if utc:
+            try:
+                flight_dt = datetime.fromisoformat(utc.replace('Z', '+00:00'))
+                delta_h = (datetime.now(timezone.utc) - flight_dt).total_seconds() / 3600
+                hours_back = max(3, int(delta_h) + 3)
+                hours_back = min(hours_back, 168)   # AWC cap: 7 days
+            except ValueError:
+                pass
+
+        # JSON format gives us obsTime for closest-match selection
+        url = (f'https://aviationweather.gov/api/data/metar'
+               f'?ids={icao}&format=json&taf=false&hours={hours_back}')
         try:
             with urllib.request.urlopen(url, timeout=10) as r:
-                self._json({'metar': r.read().decode().strip()})
+                records = json.loads(r.read())
+            if not records:
+                return self._json({'metar': ''})
+
+            if flight_dt and len(records) > 1:
+                def _obs_dt(rec):
+                    try:
+                        return datetime.fromtimestamp(int(rec['obsTime']), tz=timezone.utc)
+                    except (KeyError, ValueError, TypeError):
+                        return datetime.min.replace(tzinfo=timezone.utc)
+                best = min(records, key=lambda r: abs((_obs_dt(r) - flight_dt).total_seconds()))
+            else:
+                best = records[0]
+
+            self._json({'metar': best.get('rawOb', '')})
         except Exception as e:
             self._json({'error': str(e)}, 500)
 

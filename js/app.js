@@ -124,12 +124,14 @@ async function loadThresholds() {
 
 async function fetchMETARs(fd) {
     if (!fd.depIcao || !fd.destIcao) return;
+    const offUtc = fd.oooi?.off?.toISOString() || '';
+    const onUtc  = fd.oooi?.on?.toISOString()  || '';
     try {
         const [dep, dest] = await Promise.all([
             fetch('/api/metar', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ icao: fd.depIcao }) }).then(r => r.json()),
+                body: JSON.stringify({ icao: fd.depIcao, utc: offUtc }) }).then(r => r.json()),
             fetch('/api/metar', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ icao: fd.destIcao }) }).then(r => r.json()),
+                body: JSON.stringify({ icao: fd.destIcao, utc: onUtc }) }).then(r => r.json()),
         ]);
         fd.depMetar  = dep.metar  || '';
         fd.destMetar = dest.metar || '';
