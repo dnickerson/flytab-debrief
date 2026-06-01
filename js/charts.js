@@ -83,12 +83,25 @@ function _ds(label, data, color, dash = []) {
 
 function _altSpeedConfig(labels) {
     const datasets = [
-        _ds('Alt (ft)', Array.from(_fd.altFt), CHART_COLORS.alt),
-        _ds('GS (kt)',  Array.from(_fd.speedKts), CHART_COLORS.gs),
+        { ..._ds('Alt (ft)', Array.from(_fd.altFt), CHART_COLORS.alt), yAxisID: 'yAlt' },
+        { ..._ds('GS (kt)',  Array.from(_fd.speedKts), CHART_COLORS.gs), yAxisID: 'ySpd' },
     ];
-    if (_fd.tasKts) datasets.push(_ds('TAS* (kt)', Array.from(_fd.tasKts), CHART_COLORS.tas, [4, 2]));
-    if (_fd.iasKts) datasets.push(_ds('IAS* (kt)', Array.from(_fd.iasKts), CHART_COLORS.ias, [2, 2]));
-    return _base(labels, datasets);
+    if (_fd.tasKts) datasets.push({ ..._ds('TAS* (kt)', Array.from(_fd.tasKts), CHART_COLORS.tas, [4, 2]), yAxisID: 'ySpd' });
+    if (_fd.iasKts) datasets.push({ ..._ds('IAS* (kt)', Array.from(_fd.iasKts), CHART_COLORS.ias, [2, 2]), yAxisID: 'ySpd' });
+
+    const cfg = _base(labels, datasets);
+    cfg.options.scales.yAlt = {
+        type: 'linear', position: 'left',
+        title: { display: true, text: 'Alt (ft)', color: CHART_COLORS.alt, font: { size: 9 } },
+        ticks: { font: { size: 9 } },
+    };
+    cfg.options.scales.ySpd = {
+        type: 'linear', position: 'right',
+        title: { display: true, text: 'Speed (kt)', color: CHART_COLORS.gs, font: { size: 9 } },
+        ticks: { font: { size: 9 } },
+        grid: { drawOnChartArea: false },
+    };
+    return cfg;
 }
 
 function _egtConfig(labels) {
