@@ -175,6 +175,11 @@ class Handler(BaseHTTPRequestHandler):
         if path in ('', '/'):
             path = '/index.html'
         fp = STATIC_DIR / path.lstrip('/')
+        # Guard: block any traversal outside the repo root
+        try:
+            fp.resolve().relative_to(STATIC_DIR.resolve())
+        except ValueError:
+            return self._err(404)
         if not fp.exists() or not fp.is_file():
             return self._err(404)
         ct, _ = mimetypes.guess_type(str(fp))
