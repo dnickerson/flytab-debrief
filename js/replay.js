@@ -1,6 +1,8 @@
 // js/replay.js
 // Leaflet is loaded globally from lib/leaflet.js
 
+const _esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
 let _map, _polyline, _marker, _trafficMarkers = [], _trafficData = null;
 let _fd = null, _colorChannel = 'ml', _showTraffic = true;
 
@@ -103,7 +105,7 @@ function _renderTraffic(idx) {
             iconSize: [12, 12], iconAnchor: [6, 6],
         });
         const m = L.marker([t.lat, t.lon], { icon })
-            .bindPopup(`<b>${t.callsign || t.icao}</b><br>${t.altFt.toFixed(0)}ft · ${t.speedKts.toFixed(0)}kt · ${t.squawk}`)
+            .bindPopup(`<b>${_esc(t.callsign || t.icao)}</b><br>${t.altFt.toFixed(0)}ft · ${t.speedKts.toFixed(0)}kt · ${_esc(t.squawk)}`)
             .addTo(_map);
         _trafficMarkers.push(m);
     });

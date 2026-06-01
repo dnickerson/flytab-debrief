@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """flytab-debrief server — port 8092, 0.0.0.0"""
-import json, mimetypes, os, urllib.request
+import json, mimetypes, os, re, urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
@@ -125,6 +125,8 @@ class Handler(BaseHTTPRequestHandler):
     def _proxy_metar(self):
         body = self._read_body()
         icao = body.get('icao', '')
+        if not re.fullmatch(r'[A-Z0-9]{3,4}', icao):
+            return self._json({'error': 'invalid icao'}, 400)
         url = f'https://aviationweather.gov/api/data/metar?ids={icao}&format=raw&taf=false'
         try:
             with urllib.request.urlopen(url, timeout=10) as r:

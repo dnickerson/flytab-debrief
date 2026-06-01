@@ -11,6 +11,10 @@ import { applyAirspeeds }          from './flight-physics.js';
 
 const API = '';  // relative — same origin as server
 
+function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 async function loadFlightList() {
     const r = await fetch(`${API}/api/flights`);
     const flights = await r.json();
@@ -20,8 +24,8 @@ async function loadFlightList() {
         return;
     }
     list.innerHTML = flights.map(f => `
-        <div class="flight-item" data-name="${f.name}">
-          <span class="flight-item-name">${f.name}</span>
+        <div class="flight-item" data-name="${escHtml(f.name)}">
+          <span class="flight-item-name">${escHtml(f.name)}</span>
           ${f.hasTraffic ? '<span class="flight-item-badge">+ TRAFFIC</span>' : ''}
         </div>
     `).join('');
@@ -35,6 +39,11 @@ async function openFlight(filename) {
     document.getElementById('debrief-root').classList.remove('hidden');
 
     const csvResp = await fetch(`${API}/api/flights/${encodeURIComponent(filename)}`);
+    if (!csvResp.ok) {
+        document.getElementById('debrief-header').innerHTML =
+            `<span style="color:var(--color-danger)">Could not load flight: ${escHtml(filename)} (${csvResp.status})</span>`;
+        return;
+    }
     const csvText = await csvResp.text();
     const fd = parseCSV(csvText);
     fd.filename = filename;
@@ -96,7 +105,7 @@ async function openFlight(filename) {
 
     wireScrubber(fd, events);
     wireViewToggles(scores, events);
-    appendTrainingLog(filename, scores, events, trafficData);
+    appendTrainingLog(filename, scores, events, trafficData, fd);
 }
 
 async function loadThresholds() {
@@ -140,8 +149,8 @@ function renderHeader(fd, scores) {
           <span class="hdr-stats">Block ${fd.blockMinutes.toFixed(0)}m · Air ${fd.airMinutes.toFixed(0)}m · ${fd.totalDistanceNm.toFixed(0)} nm</span>
         </div>
         <div class="hdr-oooi">OUT ${fmt(o.out)} OFF ${fmt(o.off)} ON ${fmt(o.on)} IN ${fmt(o.in)}</div>
-        <div class="hdr-metar-dep hdr-metar">${fd.depMetar}</div>
-        <div class="hdr-metar-dest hdr-metar">${fd.destMetar}</div>
+        <div class="hdr-metar-dep hdr-metar"></div>
+        <div class="hdr-metar-dest hdr-metar"></div>
         <div class="hdr-actions">
           <button class="hdr-btn" id="ai-review-btn">AI REVIEW</button>
           <button class="hdr-btn" id="export-gpx-btn">EXPORT GPX</button>
@@ -302,7 +311,7 @@ async function exportGPX(fd) {
     a.click();
 }
 
-function appendTrainingLog(filename, scores, events, trafficData) {
+function appendTrainingLog(filename, scores, events, trafficData, fd) {
     const entry = {
         date: fd.startUtc ? fd.startUtc.toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
         route: filename.replace(/\.csv$/, ''),
