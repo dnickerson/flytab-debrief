@@ -226,7 +226,7 @@ function wireScrubber(fd, events) {
         return `<div style="position:absolute;left:${pct}%;width:2px;height:100%;background:${color};top:0"></div>`;
     }).join('');
 
-    let playing = false, speed = 1, rafId = null, lastTime = null;
+    let playing = false, speed = 1, rafId = null, lastTime = null, accumulator = 0;
     const playBtn = document.getElementById('play-btn');
 
     document.querySelectorAll('.speed-btn').forEach(btn => {
@@ -240,14 +240,18 @@ function wireScrubber(fd, events) {
     function tick(ts) {
         if (!playing) return;
         if (lastTime !== null) {
-            const elapsed = (ts - lastTime) / 1000 * speed;
-            const cur = parseInt(scrubber.value);
-            const next = Math.min(fd.rows - 1, cur + Math.floor(elapsed));
-            if (next !== cur) {
+            // Accumulate fractional seconds — Math.floor(16ms/1000 * 1x) = 0 every frame
+            // without accumulation the scrubber never advances at normal speeds.
+            accumulator += (ts - lastTime) / 1000 * speed;
+            const advance = Math.floor(accumulator);
+            if (advance > 0) {
+                accumulator -= advance;
+                const cur = parseInt(scrubber.value);
+                const next = Math.min(fd.rows - 1, cur + advance);
                 scrubber.value = next;
                 scrubber.dispatchEvent(new Event('input'));
+                if (next >= fd.rows - 1) { playing = false; playBtn.textContent = '▶'; accumulator = 0; return; }
             }
-            if (next >= fd.rows - 1) { playing = false; playBtn.textContent = '▶'; return; }
         }
         lastTime = ts;
         rafId = requestAnimationFrame(tick);
@@ -256,7 +260,7 @@ function wireScrubber(fd, events) {
     playBtn.addEventListener('click', () => {
         playing = !playing;
         playBtn.textContent = playing ? '⏸' : '▶';
-        if (playing) { lastTime = null; rafId = requestAnimationFrame(tick); }
+        if (playing) { lastTime = null; accumulator = 0; rafId = requestAnimationFrame(tick); }
         else if (rafId) cancelAnimationFrame(rafId);
     });
 

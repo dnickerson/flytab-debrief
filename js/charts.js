@@ -56,7 +56,7 @@ function _base(labels, datasets) {
 
 function _ds(label, data, color, dash = []) {
     return { label, data, borderColor: color, backgroundColor: 'transparent',
-             borderWidth: 1.5, borderDash: dash, parsing: false };
+             borderWidth: 1.5, borderDash: dash };
 }
 
 function _altSpeedConfig(labels) {
