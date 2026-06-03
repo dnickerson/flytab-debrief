@@ -217,6 +217,21 @@ html, body { height: 100%; overflow: hidden; font-family: var(--font-ui); backgr
 .vspeeds-actions { display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end; }
 .vspeeds-actions button { padding: 8px 20px; border-radius: 4px; font-weight: 700; cursor: pointer; border: 1px solid var(--border-strong); }
 
+/* ── Phase sidebar ML disagreement + correction ──────────────────── */
+.ps-ml-badge { font-size: 0.68rem; font-weight: 700; color: var(--color-caution); margin-top: 3px; cursor: pointer; }
+.ps-confirmed-badge { font-size: 0.68rem; font-weight: 700; color: var(--color-success); margin-top: 3px; }
+.ps-sidebar-header { font-size: 0.68rem; font-weight: 800; color: var(--text-label); letter-spacing: 0.06em; padding: 6px 12px 4px; border-bottom: 1px solid var(--border-light); display: flex; gap: 10px; }
+.ps-sidebar-header .disagree { color: var(--color-caution); }
+.ps-sidebar-header .confirmed { color: var(--color-success); }
+.ps-correction-panel { padding: 8px 10px; background: var(--bg-surface); border-top: 1px solid var(--border-light); }
+.ps-correction-title { font-size: 0.7rem; font-weight: 800; color: var(--text-label); margin-bottom: 6px; letter-spacing: 0.05em; }
+.ps-label-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; margin-bottom: 8px; }
+.ps-label-opt { display: flex; align-items: center; gap: 4px; font-size: 0.75rem; cursor: pointer; padding: 2px; }
+.ps-label-opt input[type=radio] { accent-color: var(--accent); }
+.ps-correction-actions { display: flex; gap: 6px; }
+.ps-correction-actions button { padding: 4px 12px; border-radius: 3px; font-size: 0.75rem; font-weight: 700; cursor: pointer; border: 1px solid var(--border-strong); }
+.ps-confirm-btn { background: var(--accent); color: #fff; border-color: var(--accent) !important; }
+
 /* ── Pulse animation for proximity traffic ───────────────────────── */
 @keyframes pulse {
   0%   { box-shadow: 0 0 0 0 rgba(184,112,0,0.6); }
