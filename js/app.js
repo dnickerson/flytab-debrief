@@ -2,14 +2,18 @@
 import { parseCSV }               from './csv-parser.js';
 import { detectOOOI }             from './oooi.js';
 import { parseTrafficNDJSON, computeProximityEvents, closestApproach } from './traffic-parser.js';
-import { scoreEngineMgmt, scoreAirmanship, scoreApproach } from './scorer.js';
+import { computeChtRoc, scoreEngineMgmt, scoreAirmanship, scoreApproach, scorePhases } from './scorer.js';
 import { detectEvents }           from './event-detector.js';
 import { initReplay }             from './replay.js';
 import { initCharts }             from './charts.js';
+import { initPhaseSidebar }       from './phase-sidebar.js';
+import { initScorePanel, seek as seekScorePanel } from './score-panel.js';
+import { initEngineCluster }      from './engine-cluster.js';
+import { initVspeeds, getVspeeds } from './vspeeds.js';
 import { initAiReview }           from './ai-review.js';
-import { applyAirspeeds }          from './flight-physics.js';
+import { applyAirspeeds }         from './flight-physics.js';
 
-const API = '';  // relative — same origin as server
+const API = '';
 
 function escHtml(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -40,8 +44,7 @@ async function openFlight(filename) {
 
     const csvResp = await fetch(`${API}/api/flights/${encodeURIComponent(filename)}`);
     if (!csvResp.ok) {
-        document.getElementById('debrief-header').innerHTML =
-            `<span style="color:var(--color-danger)">Could not load flight: ${escHtml(filename)} (${csvResp.status})</span>`;
+        document.getElementById('hdr-route').textContent = `Error loading ${filename}`;
         return;
     }
     const csvText = await csvResp.text();
@@ -68,18 +71,24 @@ async function openFlight(filename) {
     fd.blockMinutes = fd.oooi.blockMinutes;
     fd.airMinutes   = fd.oooi.airMinutes;
 
-    // Estimate IAS using ISA atmosphere (0 wind + standard temp lapse rate).
-    // Enables DMMS violation detection and speed discipline scoring.
-    // AWC winds can refine this later via applyAirspeeds with real wind data.
     const isoWinds = Array.from({ length: fd.rows }, (_, i) => ({
         windSpeed: 0, windDir: 0,
         tempC: 15 - fd.altFt[i] * 0.002,
     }));
     applyAirspeeds(fd, isoWinds, new Float32Array(fd.rows).fill(29.92));
 
+    // Compute CHT ROC and attach to fd before scoring
+    fd.chtRoc = computeChtRoc(fd);
+
     fetchMETARs(fd);
 
-    const thr = await loadThresholds();
+    const rawThr = await loadThresholds();
+
+    // V-speeds: init modal, then get merged thresholds (overrides win over defaults)
+    const tailMatch = filename.match(/N\d+[A-Z]+/i);
+    initVspeeds(rawThr, tailMatch ? tailMatch[0] : 'default');
+    const thr = getVspeeds();
+
     const scores = {
         engineMgmt: scoreEngineMgmt(fd, thr),
         airmanship: scoreAirmanship(fd, thr, trafficData),
@@ -87,24 +96,34 @@ async function openFlight(filename) {
     };
     scores.overall = Math.round(
         ([scores.engineMgmt.overall, scores.airmanship.overall,
-          scores.approach?.overall ?? 100].reduce((a, b) => a + b, 0)) / 3
+          scores.approach?.overall ?? 100].reduce((a,b) => a+b, 0)) / 3
     );
 
+    const phaseScores = scorePhases(fd, thr, trafficData);
     const events = detectEvents(fd, trafficData, thr);
 
-    renderHeader(fd, scores);
+    // Expose for browser console debugging
+    window._fd = fd;
+    window._phaseScores = phaseScores;
+    window._events = events;
 
-    initReplay(fd, trafficData, events);
-    initCharts(fd);
-    renderScorecard(scores);
-    renderEvents(events);
-    initAiReview(fd, scores, {}, events, trafficData);
+    renderHeader(fd);
 
-    const trafficToggle = document.getElementById('traffic-toggle');
-    if (trafficData) trafficToggle.classList.remove('hidden');
+    initPhaseSidebar(phaseScores, (rowIdx, phaseIdx) => {
+        const scrubber = document.getElementById('scrubber');
+        scrubber.value = rowIdx;
+        scrubber.dispatchEvent(new Event('input'));
+        window._charts?.zoomToPhase(phaseIdx);
+    });
 
-    wireScrubber(fd, events);
-    wireViewToggles(scores, events);
+    initScorePanel(fd, phaseScores, events, thr);
+    initReplay(fd, trafficData, phaseScores);
+    initEngineCluster(fd, thr);
+    initCharts(fd, phaseScores);
+    initAiReview(fd, scores, phaseScores, events, trafficData);
+
+    wireScrubber(fd, events, phaseScores);
+    wireTabSwitching();
     appendTrainingLog(filename, scores, events, trafficData, fd);
 }
 
@@ -135,98 +154,29 @@ async function fetchMETARs(fd) {
         ]);
         fd.depMetar  = dep.metar  || '';
         fd.destMetar = dest.metar || '';
-        document.querySelector('.hdr-metar-dep') &&
-            (document.querySelector('.hdr-metar-dep').textContent = fd.depMetar);
-        document.querySelector('.hdr-metar-dest') &&
-            (document.querySelector('.hdr-metar-dest').textContent = fd.destMetar);
     } catch (_) {}
 }
 
-function renderHeader(fd, scores) {
-    const fmt = d => d ? d.toISOString().slice(11, 16) + 'Z' : '--:--Z';
-    const o = fd.oooi || {};
-    document.getElementById('debrief-header').innerHTML = `
-        <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
-          <span class="hdr-route">${fd.depIcao || '?'} → ${fd.destIcao || '?'}</span>
-          <span class="hdr-stats">Block ${fd.blockMinutes.toFixed(0)}m · Air ${fd.airMinutes.toFixed(0)}m · ${fd.totalDistanceNm.toFixed(0)} nm</span>
-        </div>
-        <div class="hdr-oooi">OUT ${fmt(o.out)} OFF ${fmt(o.off)} ON ${fmt(o.on)} IN ${fmt(o.in)}</div>
-        <div class="hdr-metar-dep hdr-metar"></div>
-        <div class="hdr-metar-dest hdr-metar"></div>
-        <div class="hdr-actions">
-          <button class="hdr-btn" id="ai-review-btn">AI REVIEW</button>
-          <button class="hdr-btn" id="export-gpx-btn">EXPORT GPX</button>
-          <button class="hdr-btn" id="notes-btn">NOTES</button>
-          <button class="hdr-btn" id="back-btn">← BACK</button>
-        </div>
-    `;
+function renderHeader(fd) {
+    const route = `${fd.depIcao || '?'} → ${fd.destIcao || '?'}`;
+    const stats = `Block ${fd.blockMinutes.toFixed(0)}m · Air ${fd.airMinutes.toFixed(0)}m · ${fd.totalDistanceNm.toFixed(0)} nm`;
+    document.getElementById('hdr-route').textContent = route;
+    document.getElementById('hdr-stats').textContent = stats;
     document.getElementById('back-btn').addEventListener('click', () => location.reload());
-    document.getElementById('notes-btn').addEventListener('click', () => openNotes(fd.filename));
-    document.getElementById('export-gpx-btn').addEventListener('click', () => exportGPX(fd));
-    document.getElementById('ai-review-btn').addEventListener('click', () => {
-        document.getElementById('ai-panel').classList.remove('hidden');
-    });
 }
 
-function renderScorecard(scores) {
-    const col = s => s >= 80 ? 'green' : s >= 60 ? 'yellow' : 'red';
-    const row = (label, s) => `
-        <div class="sc-category">
-          <span class="sc-cat-label">${label}</span>
-          <div class="sc-bar-wrap"><div class="sc-bar ${col(s.overall)}" style="width:${s.overall}%"></div></div>
-          <span class="sc-cat-score">${s.overall}</span>
-        </div>`;
-    document.getElementById('scorecard').innerHTML = `
-        <div class="sc-overall">
-          <span class="sc-overall-label">Overall</span>
-          <div class="sc-bar-wrap"><div class="sc-bar ${col(scores.overall)}" style="width:${scores.overall}%"></div></div>
-          <span class="sc-overall-score">${scores.overall}</span>
-        </div>
-        ${row('Engine Mgmt', scores.engineMgmt)}
-        ${row('Airmanship', scores.airmanship)}
-        ${scores.approach ? row('Approach', scores.approach) : ''}
-        <div class="sc-view-toggles">
-          <button class="sc-toggle active" data-view="grades">GRADES</button>
-          <button class="sc-toggle active" data-view="data">DATA</button>
-          <button class="sc-toggle active" data-view="events">EVENTS</button>
-        </div>
-    `;
-}
-
-function renderEvents(events) {
-    const panel = document.getElementById('event-panel');
-    const fmt = s => {
-        const m = Math.floor(s / 60), sec = s % 60;
-        return `${String(m).padStart(2,'0')}:${String(Math.round(sec)).padStart(2,'0')}`;
-    };
-    panel.innerHTML = events.map(e => `
-        <div class="event-row" data-tsec="${e.tSec}">
-          <span class="ev-time">${fmt(e.tSec)}</span>
-          <span class="ev-type ${e.level}">${e.type}</span>
-          <span class="ev-detail">${e.detail}</span>
-        </div>
-    `).join('') || '<p style="padding:8px;color:var(--text-muted)">No events detected</p>';
-
-    panel.querySelectorAll('.event-row').forEach(row => {
-        row.addEventListener('click', () => {
-            const t = parseInt(row.dataset.tsec);
-            document.getElementById('scrubber').value = t;
-            document.getElementById('scrubber').dispatchEvent(new Event('input'));
-        });
-    });
-}
-
-function wireScrubber(fd, events) {
+function wireScrubber(fd, events, phaseScores) {
     const scrubber = document.getElementById('scrubber');
     scrubber.max = fd.rows - 1;
 
     const ticks = document.getElementById('event-ticks');
-    ticks.innerHTML = events.map(e => {
-        const pct = (e.tSec / (fd.rows - 1)) * 100;
-        const color = e.level === 'red' ? 'var(--color-danger)' :
-                      e.level === 'purple' ? '#7b2d8b' : 'var(--color-caution)';
-        return `<div style="position:absolute;left:${pct}%;width:2px;height:100%;background:${color};top:0"></div>`;
-    }).join('');
+    if (ticks) {
+        ticks.innerHTML = events.map(e => {
+            const pct = (e.tSec / (fd.rows - 1)) * 100;
+            const color = e.level === 'red' ? '#cc2222' : e.level === 'purple' ? '#7b2d8b' : '#b87000';
+            return `<div style="position:absolute;left:${pct}%;width:2px;height:100%;background:${color};top:0;opacity:0.7"></div>`;
+        }).join('');
+    }
 
     let playing = false, speed = 1, rafId = null, lastTime = null, accumulator = 0;
     const playBtn = document.getElementById('play-btn');
@@ -242,8 +192,6 @@ function wireScrubber(fd, events) {
     function tick(ts) {
         if (!playing) return;
         if (lastTime !== null) {
-            // Accumulate fractional seconds — Math.floor(16ms/1000 * 1x) = 0 every frame
-            // without accumulation the scrubber never advances at normal speeds.
             accumulator += (ts - lastTime) / 1000 * speed;
             const advance = Math.floor(accumulator);
             if (advance > 0) {
@@ -252,69 +200,81 @@ function wireScrubber(fd, events) {
                 const next = Math.min(fd.rows - 1, cur + advance);
                 scrubber.value = next;
                 scrubber.dispatchEvent(new Event('input'));
-                if (next >= fd.rows - 1) { playing = false; playBtn.textContent = '▶'; accumulator = 0; return; }
+                if (next >= fd.rows - 1) { playing = false; if (playBtn) playBtn.textContent = '▶'; accumulator = 0; return; }
             }
         }
         lastTime = ts;
         rafId = requestAnimationFrame(tick);
     }
 
-    playBtn.addEventListener('click', () => {
-        playing = !playing;
-        playBtn.textContent = playing ? '⏸' : '▶';
-        if (playing) { lastTime = null; accumulator = 0; rafId = requestAnimationFrame(tick); }
-        else if (rafId) cancelAnimationFrame(rafId);
-    });
+    if (playBtn) {
+        playBtn.addEventListener('click', () => {
+            playing = !playing;
+            playBtn.textContent = playing ? '⏸' : '▶';
+            if (playing) { lastTime = null; accumulator = 0; rafId = requestAnimationFrame(tick); }
+            else if (rafId) cancelAnimationFrame(rafId);
+        });
+    }
 
     scrubber.addEventListener('input', () => {
         const idx = parseInt(scrubber.value);
         updateTimeDisplay(fd, idx);
         window._replay?.seek(idx);
         window._charts?.seek(idx);
-    });
-
-    document.getElementById('event-list-btn').addEventListener('click', () => {
-        document.getElementById('event-panel').classList.toggle('hidden');
+        window._scorePanel?.seek(idx);
+        window._phaseSidebar?.seek(idx);
+        window._engineCluster?.seek(idx);
     });
 }
 
 function updateTimeDisplay(fd, idx) {
     if (!fd.startUtc) return;
     const t = new Date(fd.startUtc.getTime() + idx * 1000);
-    document.getElementById('time-display').textContent =
-        t.toISOString().slice(11, 19) + 'Z';
+    const el = document.getElementById('time-display');
+    if (el) el.textContent = t.toISOString().slice(11, 19) + 'Z';
 }
 
-function wireViewToggles(scores, events) {
-    document.querySelectorAll('.sc-toggle').forEach(btn => {
-        btn.addEventListener('click', () => btn.classList.toggle('active'));
+function wireTabSwitching() {
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            _switchTab(btn.dataset.tab);
+        });
     });
 }
 
-async function openNotes(filename) {
-    const modal = document.getElementById('notes-modal');
-    modal.classList.remove('hidden');
-    const r = await fetch(`/api/notes/${encodeURIComponent(filename)}`);
-    const data = await r.json();
-    document.getElementById('notes-text').value = data.text || '';
-    document.getElementById('notes-save').onclick = async () => {
-        await fetch(`/api/notes/${encodeURIComponent(filename)}`, {
-            method: 'PUT', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: document.getElementById('notes-text').value }),
-        });
-        modal.classList.add('hidden');
-    };
-    document.getElementById('notes-close').onclick = () => modal.classList.add('hidden');
-}
+function _switchTab(tab) {
+    const threePanel    = document.getElementById('three-panel');
+    const chartPanel    = document.getElementById('chart-panel');
+    const reviewPanel   = document.getElementById('review-panel');
+    const mapPanel      = document.getElementById('map-panel');
+    const engineCluster = document.getElementById('engine-cluster');
+    const trackChart    = document.getElementById('track-chart-wrap');
+    const engineChart   = document.getElementById('engine-chart-wrap');
 
-async function exportGPX(fd) {
-    const { toGPX } = await import('./gpx-export.js');
-    const gpx = toGPX(fd, fd.filename);
-    const blob = new Blob([gpx], { type: 'application/gpx+xml' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = fd.filename.replace(/\.csv$/, '.gpx');
-    a.click();
+    threePanel?.classList.toggle('hidden', tab === 'review');
+    chartPanel?.classList.toggle('hidden', tab === 'review');
+    reviewPanel?.classList.toggle('hidden', tab !== 'review');
+
+    if (tab !== 'review') {
+        mapPanel?.classList.toggle('hidden', tab !== 'track');
+        engineCluster?.classList.toggle('hidden', tab !== 'engine');
+        trackChart?.classList.toggle('hidden', tab !== 'track');
+        engineChart?.classList.toggle('hidden', tab !== 'engine');
+    }
+
+    // Invalidate Leaflet map size when switching back to track tab
+    if (tab === 'track') {
+        setTimeout(() => {
+            const mapEl = document.getElementById('map');
+            if (mapEl && mapEl._leaflet_id) {
+                const map = window.L && L.Map ? undefined : undefined;
+                // Trigger resize by dispatching resize event
+                window.dispatchEvent(new Event('resize'));
+            }
+        }, 50);
+    }
 }
 
 function appendTrainingLog(filename, scores, events, trafficData, fd) {
@@ -323,7 +283,7 @@ function appendTrainingLog(filename, scores, events, trafficData, fd) {
         route: filename.replace(/\.csv$/, ''),
         scores: { overall: scores.overall, engineMgmt: scores.engineMgmt.overall,
                   airmanship: scores.airmanship.overall, approach: scores.approach?.overall ?? null },
-        eventCounts: events.reduce((acc, e) => { acc[e.type] = (acc[e.type] || 0) + 1; return acc; }, {}),
+        eventCounts: events.reduce((acc, e) => { acc[e.type] = (acc[e.type]||0)+1; return acc; }, {}),
         trafficProximityEvents: trafficData?.proximityEvents?.length ?? 0,
         closestTrafficNm: closestApproach(trafficData?.proximityEvents || [])?.horizNm ?? null,
     };
@@ -336,8 +296,5 @@ function appendTrainingLog(filename, scores, events, trafficData, fd) {
 // ── Init ──────────────────────────────────────────────────────────────────
 const params = new URLSearchParams(location.search);
 const preload = params.get('file');
-if (preload) {
-    openFlight(preload);
-} else {
-    loadFlightList();
-}
+if (preload) openFlight(preload);
+else loadFlightList();
