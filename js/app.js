@@ -136,7 +136,52 @@ async function openFlight(filename) {
             scrubber.dispatchEvent(new Event('input'));
             window._charts?.zoomToPhase(phaseIdx);
         },
-        null  // onCorrectCb — wired in Task 7
+        async (seg, segIdx) => {
+            // Save all corrections to server
+            const corrected = phaseScores
+                .filter(p => p.pilotLabel !== null)
+                .map((p, i) => ({ segmentIdx: phaseScores.indexOf(p), pilotLabel: p.pilotLabel }));
+            fetch(`${API}/api/phases/${encodeURIComponent(filename)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ segments: corrected }),
+            }).catch(() => {});
+
+            // Append training entry
+            const avgOf = (arr, s, e) => {
+                let sum = 0, cnt = 0;
+                for (let i = s; i <= e; i++) { sum += arr[i]; cnt++; }
+                return cnt > 0 ? parseFloat((sum / cnt).toFixed(2)) : 0;
+            };
+            const s = seg.startIdx, e = seg.endIdx;
+            fetch(`${API}/api/training-log`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    type:          'phase_correction',
+                    flightDate:    fd.startUtc ? fd.startUtc.toISOString().slice(0, 10) : '',
+                    flightFile:    filename,
+                    segmentIdx:    segIdx,
+                    startIdx:      s,
+                    endIdx:        e,
+                    durationSec:   seg.durationSec,
+                    computedLabel: seg.name,
+                    mlLabel:       seg.mlLabel,
+                    pilotLabel:    seg.pilotLabel,
+                    stats: {
+                        avgAltFt:      Math.round(avgOf(fd.altFt, s, e)),
+                        avgAltRateFpm: Math.round(avgOf(fd.altRate, s, e)),
+                        avgSpeedKts:   Math.round(avgOf(fd.speedKts, s, e)),
+                        avgRpm:        Math.round(avgOf(fd.rpm, s, e)),
+                        avgPctPower:   Math.round(avgOf(fd.pctPower, s, e)),
+                        avgFuelFlow:   parseFloat(avgOf(fd.fuelFlow, s, e).toFixed(1)),
+                        maxChtF:       Math.round(Math.max(...[0,1,2,3].flatMap(c =>
+                            Array.from({length: e - s + 1}, (_, k) => fd.cht[c][s + k])))),
+                        avgBank:       parseFloat(Math.abs(avgOf(fd.bank, s, e)).toFixed(1)),
+                    },
+                }),
+            }).catch(() => {});
+        }
     );
 
     initScorePanel(fd, phaseScores, events, thr);

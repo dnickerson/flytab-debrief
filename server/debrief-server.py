@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """flytab-debrief server — port 8092, 0.0.0.0"""
-import json, mimetypes, os, re, urllib.request
+import json, mimetypes, os, re, urllib.parse, urllib.request
 from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
@@ -32,6 +32,8 @@ class Handler(BaseHTTPRequestHandler):
             self._get_notes(p[len('/api/notes/'):])
         elif p.startswith('/api/review/'):
             self._get_review(p[len('/api/review/'):])
+        elif p.startswith('/api/phases/'):
+            self._get_phases(urllib.parse.unquote(p[len('/api/phases/'):]))
         else:
             self._static(p)
 
@@ -41,6 +43,8 @@ class Handler(BaseHTTPRequestHandler):
             self._put_notes(p[len('/api/notes/'):])
         elif p.startswith('/api/review/'):
             self._put_review(p[len('/api/review/'):])
+        elif p.startswith('/api/phases/'):
+            self._put_phases(urllib.parse.unquote(p[len('/api/phases/'):]))
         else:
             self._err(404)
 
@@ -117,6 +121,24 @@ class Handler(BaseHTTPRequestHandler):
         if not self._safe_name(name): return self._err(404)
         n = int(self.headers.get('Content-Length', 0))
         (FLIGHTS_DIR / (name + '.review.json')).write_bytes(self.rfile.read(n))
+        self._json({'ok': True})
+
+    def _get_phases(self, name):
+        if not name:
+            return self._err(404)
+        path = FLIGHTS_DIR / (name + '.phases.json')
+        if path.exists():
+            self._json({'segments': json.loads(path.read_text())})
+        else:
+            self._json({'segments': None})
+
+    def _put_phases(self, name):
+        if not name:
+            return self._err(404)
+        n = int(self.headers.get('Content-Length', 0))
+        body = json.loads(self.rfile.read(n))
+        path = FLIGHTS_DIR / (name + '.phases.json')
+        path.write_text(json.dumps(body.get('segments', []), indent=2))
         self._json({'ok': True})
 
     def _proxy_winds(self):
