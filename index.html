@@ -9,7 +9,7 @@
 </head>
 <body>
 
-  <!-- Flight selector overlay (shown on load when no ?file= param) -->
+  <!-- Flight selector overlay -->
   <div id="flight-selector" class="selector-overlay">
     <div class="selector-panel">
       <h1 class="selector-title">FlyTab Debrief</h1>
@@ -17,48 +17,76 @@
     </div>
   </div>
 
-  <!-- Main debrief layout (hidden until flight loaded) -->
+  <!-- Main debrief layout -->
   <div id="debrief-root" class="debrief-root hidden">
 
-    <!-- Header -->
-    <header id="debrief-header" class="debrief-header"></header>
+    <!-- Header: route + tabs + V-speeds -->
+    <header class="debrief-header">
+      <div class="hdr-left">
+        <span class="hdr-route" id="hdr-route">— → —</span>
+        <span class="hdr-stats" id="hdr-stats"></span>
+      </div>
+      <nav class="tab-nav">
+        <button class="tab-btn active" data-tab="track">Flight Track</button>
+        <button class="tab-btn" data-tab="engine">Engine</button>
+        <button class="tab-btn" data-tab="review">AI Review</button>
+      </nav>
+      <div class="hdr-right">
+        <button class="hdr-btn" id="vspeeds-btn">V-speeds ⚙</button>
+        <button class="hdr-btn" id="back-btn">← Back</button>
+      </div>
+    </header>
 
-    <!-- Body: map left, data right -->
-    <div class="debrief-body">
-      <div id="map-panel" class="map-panel">
-        <div id="map" class="leaflet-map"></div>
-        <div class="map-color-pills">
-          <button class="color-pill active" data-channel="ml">ML SCORE</button>
-          <button class="color-pill" data-channel="cht">CHT</button>
-          <button class="color-pill" data-channel="alt">ALT</button>
-          <button class="color-pill" data-channel="speed">SPEED</button>
+    <!-- Three-panel shell (Flight Track + Engine tabs) -->
+    <div id="three-panel" class="three-panel">
+
+      <!-- Phase sidebar (shared) -->
+      <div id="phase-sidebar" class="phase-sidebar"></div>
+
+      <!-- Main panel: map (Flight Track) or instrument cluster (Engine) -->
+      <div class="main-panel">
+        <div id="map-panel" class="map-panel">
+          <div id="map" class="leaflet-map"></div>
+          <button id="traffic-menu-btn" class="traffic-menu-btn hidden">✈ ⚙</button>
+          <div id="traffic-menu" class="traffic-menu hidden">
+            <div class="tm-title">TRAFFIC DISPLAY</div>
+            <label class="tm-row"><span>Callsign</span><input type="checkbox" data-field="callsign" checked></label>
+            <label class="tm-row"><span>Altitude</span><input type="checkbox" data-field="altitude" checked></label>
+            <label class="tm-row"><span>Ground speed</span><input type="checkbox" data-field="speed"></label>
+            <label class="tm-row"><span>Heading (numeric)</span><input type="checkbox" data-field="heading"></label>
+            <label class="tm-row"><span>Squawk</span><input type="checkbox" data-field="squawk"></label>
+            <label class="tm-row"><span>Altitude band color</span><input type="checkbox" data-field="altColor" checked></label>
+            <label class="tm-row"><span>Proximity ring</span><input type="checkbox" data-field="proxRing" checked></label>
+          </div>
         </div>
-        <button id="traffic-toggle" class="traffic-toggle hidden">TRAFFIC ON</button>
+        <div id="engine-cluster" class="engine-cluster hidden"></div>
       </div>
 
-      <div class="data-panel">
-        <!-- Scorecard -->
-        <div id="scorecard" class="scorecard"></div>
-        <!-- Charts -->
-        <div class="charts-panel">
-          <div class="chart-tabs">
-            <button class="chart-tab active" data-tab="altspeed">Alt/Speed</button>
-            <button class="chart-tab" data-tab="egt">EGT</button>
-            <button class="chart-tab" data-tab="cht">CHT</button>
-            <button class="chart-tab" data-tab="ml">ML</button>
-            <button class="chart-tab" data-tab="fuel">Fuel</button>
-          </div>
-          <div id="chart-container" class="chart-container">
-            <canvas id="chart-canvas"></canvas>
-          </div>
-        </div>
+      <!-- Score / rationale panel (shared) -->
+      <div id="score-panel" class="score-panel"></div>
+
+    </div>
+
+    <!-- Chart panel (full-width, Flight Track + Engine tabs) -->
+    <div id="chart-panel" class="chart-panel">
+      <div id="track-chart-wrap" class="chart-wrap">
+        <div class="chart-toggles" id="track-toggles"></div>
+        <div class="chart-canvas-wrap"><canvas id="track-chart"></canvas></div>
+      </div>
+      <div id="engine-chart-wrap" class="chart-wrap hidden">
+        <div class="chart-toggles" id="engine-toggles"></div>
+        <div class="chart-canvas-wrap"><canvas id="engine-chart"></canvas></div>
       </div>
     </div>
 
-    <!-- Scrubber / playback bar -->
+    <!-- AI Review panel (full-width, review tab only) -->
+    <div id="review-panel" class="review-panel hidden"></div>
+
+    <!-- Playback bar (always visible) -->
     <div class="playback-bar">
       <button id="play-btn" class="play-btn">▶</button>
       <div class="scrubber-wrap">
+        <div id="phase-band" class="phase-band"></div>
         <div id="event-ticks" class="event-ticks"></div>
         <input id="scrubber" type="range" min="0" max="100" value="0" class="scrubber">
       </div>
@@ -69,30 +97,23 @@
         <button class="speed-btn" data-speed="10">10×</button>
       </div>
       <span id="time-display" class="time-display">--:--:--Z</span>
-      <button id="event-list-btn" class="event-list-btn">EVENTS</button>
     </div>
 
-    <!-- Event list panel -->
-    <div id="event-panel" class="event-panel hidden"></div>
-
-    <!-- AI review panel -->
-    <div id="ai-panel" class="ai-panel hidden"></div>
-
-    <!-- Notes modal -->
-    <div id="notes-modal" class="notes-modal hidden">
-      <div class="notes-inner">
-        <h3>Flight Notes</h3>
-        <textarea id="notes-text" rows="8"></textarea>
-        <div class="notes-actions">
-          <button id="notes-save">SAVE</button>
-          <button id="notes-close">CLOSE</button>
+    <!-- V-speeds modal -->
+    <div id="vspeeds-modal" class="vspeeds-modal hidden">
+      <div class="vspeeds-inner">
+        <h3>V-Speeds</h3>
+        <div class="vspeeds-hint">Overrides saved per aircraft. Leave blank to use default.</div>
+        <table class="vspeeds-table" id="vspeeds-table"></table>
+        <div class="vspeeds-actions">
+          <button id="vspeeds-save">SAVE</button>
+          <button id="vspeeds-cancel">CANCEL</button>
         </div>
       </div>
     </div>
 
   </div><!-- /debrief-root -->
 
-  <!-- Load order: libs → logic modules → UI modules → app -->
   <script src="lib/leaflet.js"></script>
   <script src="lib/chart.umd.min.js"></script>
   <script type="module" src="js/app.js"></script>
