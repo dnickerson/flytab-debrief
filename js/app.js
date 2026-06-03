@@ -6,7 +6,7 @@ import { scoreEngineMgmt, scoreAirmanship, scoreApproach } from './scorer.js';
 import { detectEvents }           from './event-detector.js';
 import { initReplay }             from './replay.js';
 import { initCharts }             from './charts.js';
-import { initClaudeReview }       from './claude-review.js';
+import { initAiReview }           from './ai-review.js';
 import { applyAirspeeds }          from './flight-physics.js';
 
 const API = '';  // relative — same origin as server
@@ -98,7 +98,7 @@ async function openFlight(filename) {
     initCharts(fd);
     renderScorecard(scores);
     renderEvents(events);
-    initClaudeReview(fd, scores, events, trafficData);
+    initAiReview(fd, scores, {}, events, trafficData);
 
     const trafficToggle = document.getElementById('traffic-toggle');
     if (trafficData) trafficToggle.classList.remove('hidden');
