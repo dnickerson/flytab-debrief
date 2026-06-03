@@ -6,6 +6,24 @@ export function colorForScore(s) {
 function clamp(v) { return Math.max(0, Math.min(100, v)); }
 function avg(arr) { return arr.reduce((a, b) => a + b, 0) / arr.length; }
 
+// Computes CHT rate of change (°F/min) per cylinder using a 10-second rolling window.
+// Returns array of 4 Float32Arrays, one per cylinder.
+export function computeChtRoc(fd) {
+    const n = fd.rows;
+    const roc = [
+        new Float32Array(n), new Float32Array(n),
+        new Float32Array(n), new Float32Array(n),
+    ];
+    for (let c = 0; c < 4; c++) {
+        for (let i = 0; i < n; i++) {
+            const lookback = Math.min(i, 10);
+            if (lookback < 2) { roc[c][i] = 0; continue; }
+            roc[c][i] = (fd.cht[c][i] - fd.cht[c][i - lookback]) / lookback * 60;
+        }
+    }
+    return roc;
+}
+
 export function scoreEngineMgmt(fd, thr) {
     const n = fd.rows;
 
@@ -69,11 +87,25 @@ export function scoreEngineMgmt(fd, thr) {
         }
     }
 
-    const subs = [chtScore, egtScore, mixtureScore, oilScore, carbIceScore, ffScore];
+    // CHT ROC: deduct when any cylinder exceeds 50°F/min at >65% power
+    let chtRocScore = 100;
+    if (fd.chtRoc) {
+        for (let i = 0; i < n; i++) {
+            if (fd.pctPower[i] <= 65) continue;
+            for (let c = 0; c < 4; c++) {
+                const excess = Math.abs(fd.chtRoc[c][i]) - 50;
+                if (excess > 0) chtRocScore -= excess * 0.05;
+            }
+        }
+        chtRocScore = clamp(chtRocScore);
+    }
+
+    const subs = [chtScore, egtScore, mixtureScore, oilScore, carbIceScore, ffScore, chtRocScore];
     return {
         overall: clamp(Math.round(avg(subs))),
         cht: chtScore, egtBalance: egtScore, mixture: mixtureScore,
         oilTemp: oilScore, carbIce: carbIceScore, fuelEfficiency: ffScore,
+        chtRoc: chtRocScore,
     };
 }
 
