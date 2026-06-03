@@ -7,7 +7,7 @@ import { detectEvents }           from './event-detector.js';
 import { initReplay }             from './replay.js';
 import { initCharts }             from './charts.js';
 import { initPhaseSidebar }       from './phase-sidebar.js';
-import { initScorePanel, seek as seekScorePanel } from './score-panel.js';
+import { initScorePanel } from './score-panel.js';
 import { initEngineCluster }      from './engine-cluster.js';
 import { initVspeeds, getVspeeds } from './vspeeds.js';
 import { initAiReview }           from './ai-review.js';
