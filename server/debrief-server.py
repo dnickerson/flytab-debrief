@@ -5,6 +5,11 @@ from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
+try:
+    import requests
+except ImportError:
+    requests = None
+
 FLIGHTS_DIR = Path(os.environ.get('FLIGHTS_DIR', Path.home() / 'flights'))
 PORT = int(os.environ.get('DEBRIEF_PORT', 8092))
 STATIC_DIR = Path(__file__).parent.parent
@@ -43,6 +48,7 @@ class Handler(BaseHTTPRequestHandler):
         p = self.path
         if p == '/api/winds':   self._proxy_winds()
         elif p == '/api/metar': self._proxy_metar()
+        elif p == '/api/terrain': self._proxy_terrain()
         elif p == '/api/claude': self._proxy_claude()
         elif p == '/api/training-log': self._append_training_log()
         else: self._err(404)
@@ -164,6 +170,31 @@ class Handler(BaseHTTPRequestHandler):
             self._json({'metar': best.get('rawOb', '')})
         except Exception as e:
             self._json({'error': str(e)}, 500)
+
+    def _proxy_terrain(self):
+        if not requests:
+            return self._json({'error': 'requests library not installed'}, 500)
+        body = self._read_body()
+        points = body.get('points', [])
+        if not points:
+            self._json({'elevations': []})
+            return
+        # Batch to max 100 points per request to open-elevation.com
+        elevations = []
+        batch_size = 100
+        for i in range(0, len(points), batch_size):
+            batch = points[i:i+batch_size]
+            try:
+                resp = requests.post(
+                    'https://api.open-elevation.com/api/v1/lookup',
+                    json={'locations': [{'latitude': p['lat'], 'longitude': p['lon']} for p in batch]},
+                    timeout=10,
+                )
+                results = resp.json().get('results', [])
+                elevations.extend(r.get('elevation', 0) * 3.28084 for r in results)  # m → ft
+            except Exception:
+                elevations.extend(0 for _ in batch)
+        self._json({'elevations': elevations})
 
     def _proxy_claude(self):
         api_key = os.environ.get('ANTHROPIC_API_KEY', '')
