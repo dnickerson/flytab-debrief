@@ -47,7 +47,7 @@ export function parseCSV(text) {
         tasKts: null, iasKts: null,
         filename: '', depIcao: '', destIcao: '', startUtc: null,
         oooi: null, blockMinutes: 0, airMinutes: 0, totalDistanceNm: 0,
-        phases: [], approaches: [],
+        phases: [], approaches: [], altRate: null,
         maxCht: 0, maxEgt: 0, avgFuelFlow: 0, totalFuelBurned: 0,
         avgTas: 0, avgIas: 0, avgHeadwindKt: 0,
         depMetar: '', destMetar: '', windsAloft: null,
@@ -101,8 +101,6 @@ export function parseCSV(text) {
     fd.maxEgt = maxEgt;
     fd.avgFuelFlow    = n > 0 ? totalFF / n : 0;
     fd.totalFuelBurned = totalFF / 3600;
-    fd.phases   = segmentPhases(fd.mlPhase);
-    fd.approaches = fd.phases.filter(p => p.name === 'approach');
     fd.totalDistanceNm = computeDistanceNm(fd.lat, fd.lon);
     return fd;
 }
