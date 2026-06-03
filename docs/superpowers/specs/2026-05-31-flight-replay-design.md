@@ -15,7 +15,7 @@ A standalone post-flight debrief web application that reads 1Hz CSV flight recor
 - Give the pilot objective performance feedback on both engine management and airmanship after every flight
 - Replace the mental overhead of manually reviewing EDM CSV files with a structured, visual debrief
 - Accumulate per-flight scored metrics as a training dataset for future ML analysis
-- Provide richer post-flight insight than ForeFlight (which has no engine data)
+- Provide post-flight insight including engine data not available in other tools
 
 ### Non-goals
 - In-flight use (this is a post-flight ground tool only)

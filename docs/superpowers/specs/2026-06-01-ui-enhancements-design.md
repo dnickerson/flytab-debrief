@@ -2,14 +2,14 @@
 
 **Date:** 2026-06-01  
 **Status:** Approved  
-**Reference:** ForeFlight Track Logs (screenshots 2026-06-01)  
+**Reference:** Professional aviation track log UI patterns  
 **Scope:** Baked into initial build — not a Phase 2 layer
 
 ---
 
 ## 1. Design Philosophy
 
-The ForeFlight Track Logs interface — designed by a professional UI/UX team — is the visual north star. The layout is adapted, not cloned, to accommodate flytab-debrief's unique content: engine management data (EGT, CHT, fuel flow, CHT rate of change) and an AI narrative review that ForeFlight does not have.
+The design follows professional aviation track log UI patterns and is adapted to accommodate flytab-debrief's unique content: engine management data (EGT, CHT, fuel flow, CHT rate of change) and an AI narrative review.
 
 Three principles drive every layout decision:
 
@@ -47,7 +47,7 @@ Three top-level tabs in a single 48px header bar:
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-The chart sits full-width below both the main panel and the score panel. This gives the chart maximum horizontal resolution — more x-axis pixels than ForeFlight's layout, which constrains the chart to the center column only.
+The chart sits full-width below both the main panel and the score panel, giving it maximum horizontal resolution across the full viewport width.
 
 ---
 

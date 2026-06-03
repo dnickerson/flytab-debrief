@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Transform flytab-debrief from a 2-panel layout into a ForeFlight-inspired 3-panel, 3-tab interface with phase sidebar, time-synchronized score/rationale panel, multi-overlay chart, engine instrument cluster, traffic display controls, V-speeds modal, and AI Review tab.
+**Goal:** Transform flytab-debrief from a 2-panel layout into a 3-panel, 3-tab interface with phase sidebar, time-synchronized score/rationale panel, multi-overlay chart, engine instrument cluster, traffic display controls, V-speeds modal, and AI Review tab.
 
 **Architecture:** All changes land in the existing worktree at `.claude/worktrees/feat+core` on branch `worktree-feat+core`. The app is vanilla JS + Chart.js + Leaflet — no build step. A Python server at port 8092 serves static files and proxies APIs. The scrubber drives all panels simultaneously via `window._replay.seek(idx)`, `window._scorePanel.seek(idx)`, `window._phaseSidebar.seek(idx)`, and `window._engineCluster.seek(idx)`.
 
