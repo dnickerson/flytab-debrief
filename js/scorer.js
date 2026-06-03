@@ -18,6 +18,7 @@ export function computeChtRoc(fd) {
         for (let i = 0; i < n; i++) {
             const lookback = Math.min(i, 10);
             if (lookback < 2) { roc[c][i] = 0; continue; }
+            if (fd.cht[c][i] <= 0 || fd.cht[c][i - lookback] <= 0) { roc[c][i] = 0; continue; }
             roc[c][i] = (fd.cht[c][i] - fd.cht[c][i - lookback]) / lookback * 60;
         }
     }
