@@ -1,5 +1,6 @@
 // js/csv-parser.js
 export const CSV_COLS = {
+    MP: 1,
     OIL_TEMP: 2, OIL_PRESS: 3, RPM: 7, FUEL_FLOW: 8, GAL_REM: 9,
     CARB_TEMP: 12, EGT1: 16, EGT2: 17, EGT3: 18, EGT4: 19,
     CHT1: 20, CHT2: 21, CHT3: 22, CHT4: 23,
@@ -34,6 +35,7 @@ export function parseCSV(text) {
         rpm: new Float32Array(n),
         egt: [new Float32Array(n), new Float32Array(n), new Float32Array(n), new Float32Array(n)],
         cht: [new Float32Array(n), new Float32Array(n), new Float32Array(n), new Float32Array(n)],
+        mp: new Float32Array(n),
         oilTemp: new Float32Array(n), oilPress: new Float32Array(n),
         carbTemp: new Float32Array(n), fuelFlow: new Float32Array(n),
         gallonsRem: new Float32Array(n), pctPower: new Float32Array(n),
@@ -55,6 +57,7 @@ export function parseCSV(text) {
     for (let i = 0; i < n; i++) {
         const c = data[i].split(',');
         fd.time[i]        = i;
+        fd.mp[i]          = +c[C.MP]      || 0;
         fd.rpm[i]         = +c[C.RPM]    || 0;
         fd.oilTemp[i]     = +c[C.OIL_TEMP]  || 0;
         fd.oilPress[i]    = +c[C.OIL_PRESS] || 0;

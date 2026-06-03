@@ -162,6 +162,11 @@ function _renderEngineChart() {
         borderColor: C.ff, backgroundColor: 'transparent',
         borderWidth: 1.5, pointRadius: 0, yAxisID: 'yFF',
     });
+    if (_engineActive.has('mp') && _fd.mp) datasets.push({
+        label: 'MP (inHg)', data: Array.from(_fd.mp),
+        borderColor: C.mp, backgroundColor: 'transparent',
+        borderWidth: 1.5, pointRadius: 0, yAxisID: 'yMp',
+    });
     if (_engineActive.has('rpm')) datasets.push({
         label: 'RPM', data: Array.from(_fd.rpm),
         borderColor: C.rpm, backgroundColor: 'transparent',
@@ -172,6 +177,7 @@ function _renderEngineChart() {
         yTemp: { position: 'left',  title: 'Temp (°F)', color: C.egt[0] },
         yRoc:  { position: 'right', title: 'ROC (°F/min)', color: C.roc[0], noGrid: true },
         yFF:   { position: 'right', title: 'GPH', color: C.ff, noGrid: true },
+        yMp:   { position: 'right', title: 'MP (inHg)', color: C.mp, noGrid: true, min: 0, max: 35 },
         yRpm:  { position: 'right', title: 'RPM', color: C.rpm, noGrid: true },
     });
 }
