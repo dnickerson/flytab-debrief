@@ -218,3 +218,90 @@ function _scoreOneApproach(fd, seg, thr) {
     const subs = [stabScore, sinkScore];
     return { overall: clamp(Math.round(avg(subs))), stabilization: stabScore, sinkRate: sinkScore };
 }
+
+// Returns array of {name, startIdx, endIdx, durationSec, distNm, score}
+// for each phase segment in fd.phases.
+export function scorePhases(fd, thr, trafficData) {
+    return fd.phases.map(seg => {
+        const n = seg.endIdx - seg.startIdx + 1;
+        if (n < 2) return { ...seg, score: 100, durationSec: n, distNm: 0 };
+
+        // Distance for this segment
+        let distNm = 0;
+        for (let i = seg.startIdx + 1; i <= seg.endIdx; i++) {
+            if (fd.lat[i] && fd.lon[i] && fd.lat[i-1] && fd.lon[i-1]) {
+                const dLat = (fd.lat[i] - fd.lat[i-1]) * Math.PI / 180;
+                const dLon = (fd.lon[i] - fd.lon[i-1]) * Math.PI / 180;
+                const a = Math.sin(dLat/2)**2 +
+                    Math.cos(fd.lat[i-1]*Math.PI/180)*Math.cos(fd.lat[i]*Math.PI/180)*Math.sin(dLon/2)**2;
+                distNm += 3440.065 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            }
+        }
+
+        // CHT violations in this phase
+        let chtOk = 0;
+        for (let i = seg.startIdx; i <= seg.endIdx; i++) {
+            const maxCht = Math.max(fd.cht[0][i], fd.cht[1][i], fd.cht[2][i], fd.cht[3][i]);
+            if (maxCht <= (thr.chtCaution || 380)) chtOk++;
+        }
+        const chtScore = clamp((chtOk / n) * 100);
+
+        // CHT ROC violations
+        let rocOk = n;
+        if (fd.chtRoc) {
+            rocOk = 0;
+            for (let i = seg.startIdx; i <= seg.endIdx; i++) {
+                const maxRoc = Math.max(...[0,1,2,3].map(c => Math.abs(fd.chtRoc[c][i])));
+                if (fd.pctPower[i] <= 65 || maxRoc <= 50) rocOk++;
+            }
+        }
+        const rocScore = clamp((rocOk / n) * 100);
+
+        // Bank exceedance
+        let bankOk = 0;
+        for (let i = seg.startIdx; i <= seg.endIdx; i++) {
+            if (Math.abs(fd.bank[i]) <= 30) bankOk++;
+        }
+        const bankScore = clamp((bankOk / n) * 100);
+
+        // Speed discipline (IAS vs Vno) — skip if IAS not available
+        let speedScore = 100;
+        if (fd.iasKts && thr.vnoKias) {
+            let speedOk = 0;
+            for (let i = seg.startIdx; i <= seg.endIdx; i++) {
+                if (fd.iasKts[i] <= thr.vnoKias) speedOk++;
+            }
+            speedScore = clamp((speedOk / n) * 100);
+        }
+
+        // Approach stabilization — only for approach/landing phases
+        let approachScore = 100;
+        if (seg.name === 'approach' || seg.name === 'landing') {
+            const vref = thr.vrefKias || 65;
+            const stabStart = Math.max(seg.startIdx, seg.endIdx - 30);
+            let stabOk = 0, stabTotal = 0;
+            for (let i = stabStart; i <= seg.endIdx; i++) {
+                stabTotal++;
+                const bankOkA  = Math.abs(fd.bank[i]) <= 5;
+                const sinkFpm  = i > 0 ? (fd.altFt[i-1] - fd.altFt[i]) * 60 : 0;
+                const sinkOkA  = sinkFpm < 1000;
+                const speedOkA = !fd.iasKts || Math.abs(fd.iasKts[i] - vref) <= 10;
+                if (bankOkA && sinkOkA && speedOkA) stabOk++;
+            }
+            approachScore = stabTotal > 0 ? clamp((stabOk / stabTotal) * 100) : 100;
+        }
+
+        const subs = seg.name === 'approach' || seg.name === 'landing'
+            ? [chtScore, rocScore, bankScore, speedScore, approachScore]
+            : [chtScore, rocScore, bankScore, speedScore];
+
+        return {
+            name: seg.name,
+            startIdx: seg.startIdx,
+            endIdx: seg.endIdx,
+            durationSec: n,
+            distNm: parseFloat(distNm.toFixed(1)),
+            score: clamp(Math.round(avg(subs))),
+        };
+    });
+}
