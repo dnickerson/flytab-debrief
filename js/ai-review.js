@@ -109,6 +109,10 @@ function _generateReview(fd, scores, events, trafficData) {
     });
 }
 
+function _esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 function _renderNarrative(narrative) {
     const content = document.getElementById('review-content');
     const btn = document.getElementById('review-generate-btn');
@@ -121,8 +125,8 @@ function _renderNarrative(narrative) {
     const sections = _parseSections(narrative);
     content.innerHTML = sections.map(sec => `
         <div class="review-section">
-          ${sec.title ? `<div class="review-section-hdr" data-open="1">▼ ${sec.title}</div>` : ''}
-          <div class="review-section-body">${sec.body}</div>
+          ${sec.title ? `<div class="review-section-hdr" data-open="1">▼ ${_esc(sec.title)}</div>` : ''}
+          <div class="review-section-body">${_esc(sec.body).replace(/\n\n/g,'<br><br>').replace(/\n/g,' ')}</div>
         </div>
     `).join('');
 

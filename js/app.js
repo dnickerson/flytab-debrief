@@ -113,10 +113,9 @@ async function openFlight(filename) {
         airmanship: scoreAirmanship(fd, thr, trafficData),
         approach:   scoreApproach(fd, thr),
     };
-    scores.overall = Math.round(
-        ([scores.engineMgmt.overall, scores.airmanship.overall,
-          scores.approach?.overall ?? 100].reduce((a,b) => a+b, 0)) / 3
-    );
+    const scoreCats = [scores.engineMgmt.overall, scores.airmanship.overall];
+    if (scores.approach) scoreCats.push(scores.approach.overall);
+    scores.overall = Math.round(scoreCats.reduce((a, b) => a + b, 0) / scoreCats.length);
 
     const phaseScores = scorePhases(fd, thr, trafficData);
     const events = detectEvents(fd, trafficData, thr);

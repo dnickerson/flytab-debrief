@@ -29,7 +29,7 @@ export function computeProximityEvents(snapshots, ownLat, ownLon, ownAlt) {
     const events = [];
     for (const snap of snapshots) {
         const rowIdx = Math.round(snap.tSec);
-        const idx = Math.min(rowIdx, ownLat.length - 1);
+        const idx = Math.min(Math.max(0, rowIdx), ownLat.length - 1);
         for (const t of snap.targets) {
             const horizNm = haversineNm(ownLat[idx], ownLon[idx], t.lat, t.lon);
             const vertFt  = Math.abs(ownAlt[idx] - t.altFt);

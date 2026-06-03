@@ -6,6 +6,28 @@ export function colorForScore(s) {
 function clamp(v) { return Math.max(0, Math.min(100, v)); }
 function avg(arr) { return arr.reduce((a, b) => a + b, 0) / arr.length; }
 
+// Build row-index arrays for named phases.
+// Prefers fd.phases (physics-detected segments) over raw fd.mlPhase so scoring
+// uses the same boundaries shown in the phase sidebar.
+function _phaseRows(fd, ...names) {
+    const want = new Set(names);
+    const out = {};
+    for (const n of names) out[n] = [];
+    if (fd.phases && fd.phases.length) {
+        for (const seg of fd.phases) {
+            const pn = seg.pilotLabel ?? seg.name;
+            if (want.has(pn))
+                for (let i = seg.startIdx; i <= seg.endIdx; i++) out[pn].push(i);
+        }
+    } else {
+        for (let i = 0; i < fd.rows; i++) {
+            const pn = fd.mlPhase[i];
+            if (want.has(pn)) out[pn].push(i);
+        }
+    }
+    return out;
+}
+
 // Computes CHT rate of change (°F/min) per cylinder using a 10-second rolling window.
 // Returns array of 4 Float32Arrays, one per cylinder.
 export function computeChtRoc(fd) {
@@ -40,8 +62,7 @@ export function scoreEngineMgmt(fd, thr) {
     chtScore = clamp(chtScore);
 
     // EGT balance: mean spread during cruise rows
-    const cruiseIdxs = [];
-    for (let i = 0; i < n; i++) if (fd.mlPhase[i] === 'cruise') cruiseIdxs.push(i);
+    const { cruise: cruiseIdxs } = _phaseRows(fd, 'cruise');
     let egtScore = 100;
     if (cruiseIdxs.length) {
         const spreads = cruiseIdxs.map(i => {
@@ -113,11 +134,7 @@ export function scoreEngineMgmt(fd, thr) {
 export function scoreAirmanship(fd, thr, trafficData) {
     const n = fd.rows;
     const DMMS = 1.404 * (thr.vs1Kias || 50);
-    const cruiseIdxs = [], descentIdxs = [];
-    for (let i = 0; i < n; i++) {
-        if (fd.mlPhase[i] === 'cruise')  cruiseIdxs.push(i);
-        if (fd.mlPhase[i] === 'descent') descentIdxs.push(i);
-    }
+    const { cruise: cruiseIdxs, descent: descentIdxs } = _phaseRows(fd, 'cruise', 'descent');
 
     // Altitude discipline: std dev of altFt during cruise
     let altScore = 100;
@@ -210,7 +227,7 @@ function _scoreOneApproach(fd, seg, thr) {
         if (fpm > 0) sinkRates.push(fpm);
     }
     if (sinkRates.length) {
-        const expected = vref * 101;  // 3° glidepath: fpm ≈ GS(kts) * 101
+        const expected = vref * 5.31;  // 3° glidepath: fpm ≈ GS(kts) × tan(3°) × 6076/60
         const pctDiff = Math.abs(avg(sinkRates) - expected) / expected * 100;
         sinkScore = clamp(100 - Math.max(0, pctDiff - 10) * 2);
     }

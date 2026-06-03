@@ -39,11 +39,16 @@ export function detectEvents(fd, trafficData, thr) {
         else carbSec = 0;
     }
 
-    // DMMS violation: IAS < DMMS+5 AND |bank| > 15
+    // DMMS violation: IAS < DMMS+5 AND |bank| > 15 — debounce: one event per exceedance block
     if (fd.iasKts) {
+        let dmmsBlock = false;
         for (let i = 0; i < n; i++) {
-            if (fd.iasKts[i] < DMMS + 5 && Math.abs(fd.bank[i]) > 15)
-                events.push(_ev(i, 'DMMS_VIOLATION', 'red', `IAS ${fd.iasKts[i].toFixed(0)}kt bank ${fd.bank[i].toFixed(0)}°`));
+            if (fd.iasKts[i] < DMMS + 5 && Math.abs(fd.bank[i]) > 15) {
+                if (!dmmsBlock) {
+                    events.push(_ev(i, 'DMMS_VIOLATION', 'red', `IAS ${fd.iasKts[i].toFixed(0)}kt bank ${fd.bank[i].toFixed(0)}°`));
+                    dmmsBlock = true;
+                }
+            } else { dmmsBlock = false; }
         }
     }
 

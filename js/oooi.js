@@ -13,10 +13,13 @@ export function detectOOOI(fd, depElevFt = null, arrElevFt = null) {
     }
 
     // OFF: first row after Out where alt > depElev+200 AND speed > 40
+    // Only search if Out was found; a -1 outIdx means no valid engine start
     let offIdx = -1;
-    for (let i = Math.max(0, outIdx); i < n; i++) {
-        if (fd.altFt[i] > depElevFt + 200 && fd.speedKts[i] > 40) {
-            offIdx = i; break;
+    if (outIdx >= 0) {
+        for (let i = outIdx; i < n; i++) {
+            if (fd.altFt[i] > depElevFt + 200 && fd.speedKts[i] > 40) {
+                offIdx = i; break;
+            }
         }
     }
 

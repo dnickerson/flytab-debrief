@@ -14,6 +14,14 @@ FLIGHTS_DIR = Path(os.environ.get('FLIGHTS_DIR', Path.home() / 'flights'))
 PORT = int(os.environ.get('DEBRIEF_PORT', 8092))
 STATIC_DIR = Path(__file__).parent.parent
 
+# Only allow CORS for local origins: localhost, home LAN (192.168.*), Tailscale (100.*)
+_ALLOWED_ORIGIN = re.compile(
+    r'^https?://(localhost|127\.0\.0\.1'
+    r'|192\.168\.\d{1,3}\.\d{1,3}'
+    r'|100\.\d{1,3}\.\d{1,3}\.\d{1,3})'
+    r'(:\d+)?$'
+)
+
 
 class Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
@@ -60,7 +68,10 @@ class Handler(BaseHTTPRequestHandler):
     # ── helpers ──────────────────────────────────────────────────────────────
 
     def _cors(self):
-        self.send_header('Access-Control-Allow-Origin', '*')
+        origin = self.headers.get('Origin', '')
+        if _ALLOWED_ORIGIN.match(origin):
+            self.send_header('Access-Control-Allow-Origin', origin)
+            self.send_header('Vary', 'Origin')
         self.send_header('Access-Control-Allow-Methods', 'GET,POST,PUT,OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
 
@@ -124,7 +135,7 @@ class Handler(BaseHTTPRequestHandler):
         self._json({'ok': True})
 
     def _get_phases(self, name):
-        if not name:
+        if not self._safe_name(name):
             return self._err(404)
         path = FLIGHTS_DIR / (name + '.phases.json')
         if path.exists():
@@ -133,7 +144,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json({'segments': None})
 
     def _put_phases(self, name):
-        if not name:
+        if not self._safe_name(name):
             return self._err(404)
         n = int(self.headers.get('Content-Length', 0))
         body = json.loads(self.rfile.read(n))
@@ -220,18 +231,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _proxy_claude(self):
         api_key = os.environ.get('ANTHROPIC_API_KEY', '')
-        is_oauth = False
         if not api_key:
-            # Fall back to Claude Code's OAuth token when on the home server
-            creds = Path.home() / '.claude' / '.credentials.json'
-            if creds.exists():
-                try:
-                    api_key = json.loads(creds.read_text())['claudeAiOauth']['accessToken']
-                    is_oauth = True
-                except (KeyError, json.JSONDecodeError):
-                    pass
-        if not api_key:
-            return self._json({'error': 'No API key: set ANTHROPIC_API_KEY or log in to Claude Code'}, 500)
+            return self._json({'error': 'No API key: set ANTHROPIC_API_KEY environment variable'}, 500)
         body = self._read_body()
         payload = body.get('payload', {})
         system = ("You are an experienced CFI and A&P mechanic reviewing a post-flight data debrief "
@@ -246,9 +247,7 @@ class Handler(BaseHTTPRequestHandler):
                         "cache_control": {"type": "ephemeral"}}],
             "messages": [{"role": "user", "content": json.dumps(payload)}]
         }).encode()
-        # OAuth tokens use Authorization: Bearer; regular API keys use x-api-key
-        auth_headers = ({'Authorization': f'Bearer {api_key}'} if is_oauth
-                        else {'x-api-key': api_key})
+        auth_headers = {'x-api-key': api_key}
         req = urllib.request.Request(
             'https://api.anthropic.com/v1/messages', data=req_body,
             headers={'Content-Type': 'application/json',
