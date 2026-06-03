@@ -86,6 +86,12 @@ export function seek(rowIdx) {
         <div class="sp-section-title">AIRMANSHIP</div>
         ${_row('Bank', `${Math.abs(bank).toFixed(0)}°`, bankStatus, bankStatus !== 'pass' ? '>30°' : '')}
         ${ias !== null ? _row('IAS', `${ias.toFixed(0)} kt`, iasStatus, iasStatus !== 'pass' ? `Vno ${vno}` : '') : ''}
+        ${_row('Ground speed', `${(_fd.speedKts[rowIdx] ?? 0).toFixed(0)} kt`, 'pass', '')}
+        ${_fd.altRate && Math.abs(_fd.altRate[rowIdx]) >= 50 ? (
+            _fd.altRate[rowIdx] > 0
+                ? _row('Rate of climb', `+${_fd.altRate[rowIdx].toFixed(0)} fpm`, 'pass', '')
+                : _row('Rate of descent', `${_fd.altRate[rowIdx].toFixed(0)} fpm`, 'pass', '')
+        ) : ''}
         ${_row('Alt stability', `±${altStd.toFixed(0)} ft`, altStatus, '')}
 
         <div class="sp-section-title">ENGINE</div>
