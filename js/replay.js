@@ -1,19 +1,24 @@
 // js/replay.js
-// Leaflet is loaded globally from lib/leaflet.js
 
 const _esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
-let _map, _polyline, _marker, _trafficMarkers = [], _trafficData = null;
-let _fd = null, _colorChannel = 'ml', _showTraffic = true;
+let _map, _trackGroup, _marker, _trafficMarkers = [];
+let _fd = null, _trafficData = null, _phaseScores = null;
 
-export function initReplay(fd, trafficData, events) {
+// Traffic display prefs — loaded from localStorage
+let _trafficPrefs = {
+    callsign: true, altitude: true, speed: false,
+    heading: false, squawk: false, altColor: true, proxRing: true,
+};
+
+export function initReplay(fd, trafficData, phaseScores) {
     _fd = fd;
     _trafficData = trafficData;
+    _phaseScores = phaseScores;
+    _loadTrafficPrefs();
 
     if (!_map) {
         _map = L.map('map', { zoomControl: true });
-        // Primary: sectional tiles from FlyTab home server (same source as FlyTab cockpit)
-        // Fallback: OSM when home server unreachable
         const sectional = L.tileLayer('http://192.168.1.77:8090/tiles/sectional/{z}/{x}/{y}.png', {
             maxZoom: 12, attribution: 'FAA Sectional',
         });
@@ -26,52 +31,29 @@ export function initReplay(fd, trafficData, events) {
         _map.eachLayer(l => { if (!(l instanceof L.TileLayer)) _map.removeLayer(l); });
     }
 
-    _colorTrack();
+    _renderTrack();
     _renderMarker(0);
     _fitBounds();
-    _wireColorPills();
-    _wireTrafficToggle();
+    _wireTrafficMenu();
 
     window._replay = { seek };
 }
 
-function _colorTrack() {
-    if (_polyline) { _map.removeLayer(_polyline); _polyline = null; }
-    const group = L.layerGroup().addTo(_map);
+function _scoreColor(score) {
+    return score >= 80 ? '#1a8c35' : score >= 60 ? '#b87000' : '#cc2222';
+}
 
-    // Render one polyline per phase segment (max ~10 segments per flight).
-    // Per-point polylines (4000+ layers) cause severe Leaflet performance degradation.
-    for (const seg of _fd.phases) {
+function _renderTrack() {
+    if (_trackGroup) { _map.removeLayer(_trackGroup); _trackGroup = null; }
+    _trackGroup = L.layerGroup().addTo(_map);
+    for (const ps of (_phaseScores || [])) {
         const pts = [];
-        for (let i = seg.startIdx; i <= seg.endIdx; i++) {
+        for (let i = ps.startIdx; i <= ps.endIdx; i++) {
             if (_fd.lat[i] && _fd.lon[i]) pts.push([_fd.lat[i], _fd.lon[i]]);
         }
         if (pts.length < 2) continue;
-        // Color by the midpoint value of the segment
-        const mid = Math.round((seg.startIdx + seg.endIdx) / 2);
-        const color = _valueColor(_channelValue(mid));
-        L.polyline(pts, { color, weight: 3, opacity: 0.85 }).addTo(group);
+        L.polyline(pts, { color: _scoreColor(ps.score), weight: 3, opacity: 0.85 }).addTo(_trackGroup);
     }
-    _polyline = group;
-}
-
-function _channelValue(i) {
-    if (_colorChannel === 'ml')    return _fd.mlScore[i];
-    if (_colorChannel === 'cht')   return Math.max(...[0,1,2,3].map(c => _fd.cht[c][i])) / 435;
-    if (_colorChannel === 'alt')   return _fd.altFt[i] / 15000;
-    if (_colorChannel === 'speed') return _fd.speedKts[i] / 200;
-    return 0;
-}
-
-function _valueColor(v) {
-    // 0=green, 0.5=yellow, 1=red interpolation
-    const clamped = Math.max(0, Math.min(1, v));
-    if (clamped < 0.5) {
-        const t = clamped * 2;
-        return `rgb(${Math.round(26 + (184-26)*t)},${Math.round(140 + (112-140)*t)},${Math.round(53)})`;
-    }
-    const t = (clamped - 0.5) * 2;
-    return `rgb(${Math.round(184 + (204-184)*t)},${Math.round(112 + (34-112)*t)},${Math.round(34*t)})`;
 }
 
 function _renderMarker(idx) {
@@ -90,25 +72,54 @@ function _renderMarker(idx) {
 function _renderTraffic(idx) {
     _trafficMarkers.forEach(m => _map.removeLayer(m));
     _trafficMarkers = [];
-    if (!_trafficData || !_showTraffic) return;
+    if (!_trafficData) return;
 
     const snap = _trafficData.snapshots.find(s => Math.abs(s.tSec - idx) <= 5);
     if (!snap) return;
 
     const ownAlt = _fd.altFt[idx];
-    snap.targets.forEach(t => {
+    const prefs = _trafficPrefs;
+
+    for (const t of snap.targets) {
         const diff = t.altFt - ownAlt;
-        const color = Math.abs(diff) < 1000 ? '#b87000' : diff > 0 ? '#0055bb' : '#888888';
+        const isProx = Math.abs(diff) < 1000;
+        const colorHex = (!prefs.altColor) ? '#0066cc'
+            : isProx ? '#b87000'
+            : diff > 0 ? '#0055bb'
+            : '#888888';
+
+        // Build label HTML
+        const parts = [];
+        if (prefs.callsign && (t.callsign || t.icao))
+            parts.push(`<div style="font-weight:700;white-space:nowrap;font-size:0.72rem">${_esc(t.callsign || t.icao)}</div>`);
+        const sub = [];
+        if (prefs.altitude) sub.push(`${t.altFt.toFixed(0)}ft`);
+        if (prefs.speed)    sub.push(`${t.speedKts.toFixed(0)}kt`);
+        if (prefs.heading)  sub.push(`${t.heading.toFixed(0)}°`);
+        if (sub.length) parts.push(`<div style="font-size:0.68rem;white-space:nowrap;color:#444">${sub.join(' · ')}</div>`);
+
+        const pulseStyle = (prefs.proxRing && isProx)
+            ? 'animation:pulse 1s infinite;'
+            : '';
+        const iconHtml = `
+            <div style="display:flex;flex-direction:column;align-items:center;line-height:1.2">
+              <div style="font-size:1rem;color:${colorHex};transform:rotate(${t.heading}deg);display:inline-block;${pulseStyle}">✈</div>
+              ${parts.join('')}
+            </div>`;
+
         const icon = L.divIcon({
-            className: '',
-            html: `<div style="width:12px;height:12px;background:${color};border-radius:50%;border:1.5px solid #fff;opacity:0.85"></div>`,
-            iconSize: [12, 12], iconAnchor: [6, 6],
+            className: '', html: iconHtml,
+            iconSize: [64, 52], iconAnchor: [32, 12],
         });
+
+        let popupContent = `<b>${_esc(t.callsign || t.icao)}</b><br>${t.altFt.toFixed(0)}ft · ${t.speedKts.toFixed(0)}kt · hdg ${t.heading.toFixed(0)}°`;
+        popupContent += `<br>Squawk: ${_esc(t.squawk || '—')} · ICAO: ${_esc(t.icao)}`;
+
         const m = L.marker([t.lat, t.lon], { icon })
-            .bindPopup(`<b>${_esc(t.callsign || t.icao)}</b><br>${t.altFt.toFixed(0)}ft · ${t.speedKts.toFixed(0)}kt · ${_esc(t.squawk)}`)
+            .bindPopup(popupContent)
             .addTo(_map);
         _trafficMarkers.push(m);
-    });
+    }
 }
 
 function _fitBounds() {
@@ -118,24 +129,41 @@ function _fitBounds() {
     if (pts.length) _map.fitBounds(pts);
 }
 
-function _wireColorPills() {
-    document.querySelectorAll('.color-pill').forEach(btn => {
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('.color-pill').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            _colorChannel = btn.dataset.channel;
-            _colorTrack();
+function _wireTrafficMenu() {
+    const menuBtn = document.getElementById('traffic-menu-btn');
+    const menu    = document.getElementById('traffic-menu');
+    if (!menuBtn || !menu) return;
+
+    if (_trafficData) menuBtn.classList.remove('hidden');
+
+    menuBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        menu.classList.toggle('hidden');
+    });
+    document.addEventListener('click', (e) => {
+        if (!menu.contains(e.target) && e.target !== menuBtn) menu.classList.add('hidden');
+    });
+
+    menu.querySelectorAll('input[type=checkbox]').forEach(cb => {
+        const field = cb.dataset.field;
+        cb.checked = _trafficPrefs[field] !== false;
+        cb.addEventListener('change', () => {
+            _trafficPrefs[field] = cb.checked;
+            _saveTrafficPrefs();
+            seek(parseInt(document.getElementById('scrubber').value));
         });
     });
 }
 
-function _wireTrafficToggle() {
-    const btn = document.getElementById('traffic-toggle');
-    btn.addEventListener('click', () => {
-        _showTraffic = !_showTraffic;
-        btn.textContent = _showTraffic ? 'TRAFFIC ON' : 'TRAFFIC OFF';
-        seek(parseInt(document.getElementById('scrubber').value));
-    });
+function _loadTrafficPrefs() {
+    try {
+        const saved = JSON.parse(localStorage.getItem('trafficPrefs') || '{}');
+        Object.assign(_trafficPrefs, saved);
+    } catch (_) {}
+}
+
+function _saveTrafficPrefs() {
+    try { localStorage.setItem('trafficPrefs', JSON.stringify(_trafficPrefs)); } catch (_) {}
 }
 
 export function seek(idx) {
