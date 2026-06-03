@@ -79,6 +79,24 @@ export function detectEvents(fd, trafficData, thr) {
         }
     }
 
+    // CHT ROC caution: sustained >50°F/min at >65% power for 30s
+    if (fd.chtRoc) {
+        for (let cyl = 0; cyl < 4; cyl++) {
+            let streak = 0;
+            for (let i = 0; i < n; i++) {
+                if (fd.pctPower[i] > 65 && Math.abs(fd.chtRoc[cyl][i]) > 50) {
+                    streak++;
+                    if (streak === 30) {
+                        events.push(_ev(i, 'CHT_ROC_CAUTION', 'orange',
+                            `CHT${cyl + 1} ${fd.chtRoc[cyl][i].toFixed(0)}°F/min`));
+                    }
+                } else {
+                    streak = 0;
+                }
+            }
+        }
+    }
+
     // Traffic proximity from pre-computed events
     if (trafficData?.proximityEvents) {
         for (const pe of trafficData.proximityEvents)
