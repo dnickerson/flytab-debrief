@@ -12,6 +12,7 @@ import { initEngineCluster }      from './engine-cluster.js';
 import { initVspeeds, getVspeeds } from './vspeeds.js';
 import { initAiReview }           from './ai-review.js';
 import { applyAirspeeds }         from './flight-physics.js';
+import { detectPhases }            from './phase-detector.js';
 
 const API = '';
 
@@ -80,6 +81,24 @@ async function openFlight(filename) {
     // Compute CHT ROC and attach to fd before scoring
     fd.chtRoc = computeChtRoc(fd);
 
+    // Physics-based phase detection — must run after detectOOOI
+    // Populates fd.phases, fd.approaches, and fd.altRate
+    detectPhases(fd);
+
+    // Load any saved pilot corrections and overlay onto segments
+    try {
+        const saved = await fetch(`${API}/api/phases/${encodeURIComponent(filename)}`);
+        if (saved.ok) {
+            const { segments } = await saved.json();
+            if (Array.isArray(segments)) {
+                for (const cor of segments) {
+                    const seg = fd.phases[cor.segmentIdx];
+                    if (seg) seg.pilotLabel = cor.pilotLabel;
+                }
+            }
+        }
+    } catch (_) {}
+
     fetchMETARs(fd);
 
     const rawThr = await loadThresholds();
@@ -109,12 +128,16 @@ async function openFlight(filename) {
 
     renderHeader(fd);
 
-    initPhaseSidebar(phaseScores, (rowIdx, phaseIdx) => {
-        const scrubber = document.getElementById('scrubber');
-        scrubber.value = rowIdx;
-        scrubber.dispatchEvent(new Event('input'));
-        window._charts?.zoomToPhase(phaseIdx);
-    });
+    initPhaseSidebar(
+        phaseScores,
+        (rowIdx, phaseIdx) => {
+            const scrubber = document.getElementById('scrubber');
+            scrubber.value = rowIdx;
+            scrubber.dispatchEvent(new Event('input'));
+            window._charts?.zoomToPhase(phaseIdx);
+        },
+        null  // onCorrectCb — wired in Task 7
+    );
 
     initScorePanel(fd, phaseScores, events, thr);
     initReplay(fd, trafficData, phaseScores);
