@@ -19,14 +19,33 @@ export function initReplay(fd, trafficData, phaseScores) {
 
     if (!_map) {
         _map = L.map('map', { zoomControl: true });
-        const sectional = L.tileLayer('http://192.168.1.77:8090/tiles/sectional/{z}/{x}/{y}.png', {
+
+        const TILE_BASE = 'http://192.168.1.77:8090/tiles';
+        const sectional = L.tileLayer(`${TILE_BASE}/sectional/{z}/{x}/{y}.webp`, {
             maxZoom: 12, attribution: 'FAA Sectional',
+        });
+        const ifrLow = L.tileLayer(`${TILE_BASE}/ifr-low/{z}/{x}/{y}.webp`, {
+            maxZoom: 10, attribution: 'FAA IFR Low',
+        });
+        const ifrArea = L.tileLayer(`${TILE_BASE}/ifr-area/{z}/{x}/{y}.webp`, {
+            minZoom: 10, maxZoom: 12, attribution: 'FAA IFR Area',
         });
         const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '© OpenStreetMap', maxZoom: 18,
         });
+
+        // Try sectional first; fall back to OSM if home server unreachable
+        let homeServerOk = true;
+        sectional.on('tileerror', () => {
+            if (homeServerOk) { homeServerOk = false; sectional.remove(); osm.addTo(_map); }
+        });
         sectional.addTo(_map);
-        sectional.on('tileerror', () => { sectional.remove(); osm.addTo(_map); });
+
+        L.control.layers(
+            { 'VFR Sectional': sectional, 'IFR Low': ifrLow, 'IFR Area': ifrArea, 'Street Map': osm },
+            {},
+            { position: 'topright', collapsed: true }
+        ).addTo(_map);
     } else {
         _map.eachLayer(l => { if (!(l instanceof L.TileLayer)) _map.removeLayer(l); });
     }
