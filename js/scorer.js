@@ -223,6 +223,7 @@ function _scoreOneApproach(fd, seg, thr) {
 // for each phase segment in fd.phases.
 export function scorePhases(fd, thr, trafficData) {
     return fd.phases.map(seg => {
+        const effectiveName = seg.pilotLabel ?? seg.name;
         const n = seg.endIdx - seg.startIdx + 1;
         if (n < 2) return { ...seg, score: 100, durationSec: n, distNm: 0 };
 
@@ -276,7 +277,7 @@ export function scorePhases(fd, thr, trafficData) {
 
         // Approach stabilization — only for approach/landing phases
         let approachScore = 100;
-        if (seg.name === 'approach' || seg.name === 'landing') {
+        if (effectiveName === 'approach' || effectiveName === 'landing') {
             const vref = thr.vrefKias || 65;
             const stabStart = Math.max(seg.startIdx, seg.endIdx - 30);
             let stabOk = 0, stabTotal = 0;
@@ -291,17 +292,21 @@ export function scorePhases(fd, thr, trafficData) {
             approachScore = stabTotal > 0 ? clamp((stabOk / stabTotal) * 100) : 100;
         }
 
-        const subs = seg.name === 'approach' || seg.name === 'landing'
+        const subs = effectiveName === 'approach' || effectiveName === 'landing'
             ? [chtScore, rocScore, bankScore, speedScore, approachScore]
             : [chtScore, rocScore, bankScore, speedScore];
 
         return {
             name: seg.name,
+            effectiveName,
             startIdx: seg.startIdx,
             endIdx: seg.endIdx,
             durationSec: n,
             distNm: parseFloat(distNm.toFixed(1)),
             score: clamp(Math.round(avg(subs))),
+            mlLabel: seg.mlLabel ?? null,
+            mlAgreement: seg.mlAgreement ?? true,
+            pilotLabel: seg.pilotLabel ?? null,
         };
     });
 }
