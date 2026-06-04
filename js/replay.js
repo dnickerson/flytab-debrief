@@ -44,7 +44,7 @@ export function initReplay(fd, trafficData, phaseScores) {
         L.control.layers(
             { 'VFR Sectional': sectional, 'IFR Low': ifrLow, 'IFR Area': ifrArea, 'Street Map': osm },
             {},
-            { position: 'topright', collapsed: true }
+            { position: 'bottomleft', collapsed: true }
         ).addTo(_map);
     } else {
         _map.eachLayer(l => { if (!(l instanceof L.TileLayer)) _map.removeLayer(l); });
