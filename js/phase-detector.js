@@ -28,16 +28,19 @@ export function detectPhases(fd) {
         if (fd.altFt[i] > depElev + 200 && fd.speedKts[i] > 40) { takeoffIdx = i; break; }
     }
 
-    let landingIdx = n - 1;
-    for (let i = n - 1; i >= takeoffIdx; i--) {
-        if (fd.altFt[i] < arrElev + 200 && fd.speedKts[i] < 100) { landingIdx = i; break; }
+    // Search backward for the last row where the aircraft was still airborne
+    // or on high-speed rollout (alt > arrElev+100 OR speed > 30 kt).
+    // This gives the actual touchdown boundary rather than the last ground row.
+    let landingIdx = takeoffIdx;
+    for (let i = n - 1; i > takeoffIdx; i--) {
+        if (fd.altFt[i] > arrElev + 100 || fd.speedKts[i] > 30) { landingIdx = i; break; }
     }
 
     // ── 3. Build segments ─────────────────────────────────────────────────
     const segs = [];
     _groundPhases(fd, 0, takeoffIdx - 1, segs);
     if (takeoffIdx <= landingIdx) _flightPhases(fd, altRate, takeoffIdx, landingIdx, segs);
-    if (landingIdx + 1 < n) segs.push({ name: 'landing', startIdx: landingIdx + 1, endIdx: n - 1 });
+    _postLandingPhases(fd, landingIdx + 1, n - 1, segs);
 
     if (!segs.length) segs.push({ name: 'ground', startIdx: 0, endIdx: n - 1 });
 
@@ -69,6 +72,20 @@ function _fieldElev(fd, from, to) {
         }
     }
     return count > 0 ? sum / count : 0;
+}
+
+// Generate post-landing segments: rollout → taxi to parking.
+// Landing = touchdown to when speed first drops below 20 kt (runway exit).
+// Taxi  = runway exit to end of recording.
+function _postLandingPhases(fd, start, end, out) {
+    if (start > end) return;
+    // Find the first row where speed drops below 20 kt (runway exit / turnoff)
+    let taxiStart = end + 1; // default: no taxi, all landing
+    for (let i = start; i <= end; i++) {
+        if (fd.speedKts[i] < 20) { taxiStart = i; break; }
+    }
+    if (taxiStart > start) out.push({ name: 'landing', startIdx: start, endIdx: taxiStart - 1 });
+    if (taxiStart <= end)  out.push({ name: 'taxi',    startIdx: taxiStart, endIdx: end });
 }
 
 function _groundPhases(fd, start, end, out) {
