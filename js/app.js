@@ -99,9 +99,7 @@ async function openFlight(filename) {
         }
     } catch (_) {}
 
-    fetchMETARs(fd);
-
-    const rawThr = await loadThresholds();
+    const [rawThr] = await Promise.all([loadThresholds(), fetchMETARs(fd)]);
 
     // V-speeds: init modal, then get merged thresholds (overrides win over defaults)
     const tailMatch = filename.match(/N\d+[A-Z]+/i);
