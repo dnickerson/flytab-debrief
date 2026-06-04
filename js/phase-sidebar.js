@@ -51,19 +51,20 @@ function _buildDisplayList(phaseScores) {
     const display = [];
 
     // ── Pre-takeoff ground block ────────────────────────────────────────
+    // Collect all ground sub-phase segments, aggregate by type, then emit
+    // in canonical order regardless of when each type first occurred.
+    const PRE_ORDER = ['startup', 'warmup', 'taxi', 'runup', 'ground'];
     const preEnd = firstFlight === -1 ? phaseScores.length : firstFlight;
     const seenPre = new Map(); // name → display entry
     for (let i = 0; i < preEnd; i++) {
         const ps = phaseScores[i];
         if (!GROUND_SUBS.has(ps.name)) continue;
         if (!seenPre.has(ps.name)) {
-            const entry = {
+            seenPre.set(ps.name, {
                 name: ps.name, startIdx: ps.startIdx,
                 durationSec: ps.durationSec, distNm: ps.distNm,
                 score: ps.score, originalIndices: [i], _originalIdx: i,
-            };
-            seenPre.set(ps.name, entry);
-            display.push(entry);
+            });
         } else {
             const entry = seenPre.get(ps.name);
             entry.durationSec += ps.durationSec;
@@ -72,6 +73,10 @@ function _buildDisplayList(phaseScores) {
                            (entry.originalIndices.length + 1));
             entry.originalIndices.push(i);
         }
+    }
+    // Emit in canonical order, skipping types that didn't occur
+    for (const name of PRE_ORDER) {
+        if (seenPre.has(name)) display.push(seenPre.get(name));
     }
 
     // ── In-flight phases ─────────────────────────────────────────────────
