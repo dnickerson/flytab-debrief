@@ -10,10 +10,13 @@ const PHASE_LABELS = {
     climb: 'Climb', cruise: 'Cruise', descent: 'Descent', approach: 'Approach', landing: 'Landing',
 };
 
-const REPEATABLE = new Set(['climb', 'cruise', 'descent']);
+// Ground sub-phases that are deduplicated within each ground block.
+const GROUND_SUBS = new Set(['ground', 'startup', 'warmup', 'taxi', 'runup']);
+// Flight phases that repeat in-flight and are numbered.
+const REPEATABLE  = new Set(['climb', 'cruise', 'descent']);
 
 let _phaseScores = null;
-let _onSeekCb = null;
+let _onSeekCb    = null;
 let _onCorrectCb = null;
 let _openCorrectionIdx = -1;
 
@@ -24,17 +27,114 @@ function fmtDuration(sec) {
     return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
-function _numberedLabel(phaseScores, idx) {
-    const name = phaseScores[idx].name;
-    if (!REPEATABLE.has(name)) return PHASE_LABELS[name] || name;
-    let count = 0;
-    for (let i = 0; i <= idx; i++) { if (phaseScores[i].name === name) count++; }
-    return `${PHASE_LABELS[name]} ${count}`;
+// Build the display-level phase list from raw phaseScores.
+//
+// Canonical output sequence:
+//   startup → warmup → taxi → runup          (pre-takeoff, one row per type)
+//   climb / cruise / descent / approach       (in-flight, numbered when repeated)
+//   landing → taxi                            (post-landing, one row per type)
+//
+// Ground sub-phases within each block are deduplicated by name: the first
+// occurrence navigates to its startIdx; subsequent occurrences accumulate
+// into the same display row (duration and distance sum). Underlying
+// phaseScores data is NOT mutated — this is display-only.
+function _buildDisplayList(phaseScores) {
+    const FLIGHT = new Set(['climb', 'cruise', 'descent', 'approach']);
+
+    // Partition into pre-takeoff / in-flight / post-landing blocks
+    let firstFlight = phaseScores.findIndex(p => FLIGHT.has(p.name));
+    let lastFlight  = -1;
+    for (let i = phaseScores.length - 1; i >= 0; i--) {
+        if (FLIGHT.has(phaseScores[i].name)) { lastFlight = i; break; }
+    }
+
+    const display = [];
+
+    // ── Pre-takeoff ground block ────────────────────────────────────────
+    const preEnd = firstFlight === -1 ? phaseScores.length : firstFlight;
+    const seenPre = new Map(); // name → display entry
+    for (let i = 0; i < preEnd; i++) {
+        const ps = phaseScores[i];
+        if (!GROUND_SUBS.has(ps.name)) continue;
+        if (!seenPre.has(ps.name)) {
+            const entry = {
+                name: ps.name, startIdx: ps.startIdx,
+                durationSec: ps.durationSec, distNm: ps.distNm,
+                score: ps.score, originalIndices: [i], _originalIdx: i,
+            };
+            seenPre.set(ps.name, entry);
+            display.push(entry);
+        } else {
+            const entry = seenPre.get(ps.name);
+            entry.durationSec += ps.durationSec;
+            entry.distNm = parseFloat((entry.distNm + ps.distNm).toFixed(1));
+            entry.score  = Math.round((entry.score * entry.originalIndices.length + ps.score) /
+                           (entry.originalIndices.length + 1));
+            entry.originalIndices.push(i);
+        }
+    }
+
+    // ── In-flight phases ─────────────────────────────────────────────────
+    // Number each repeatable type independently within the flight block.
+    const flightCounts = {};
+    for (let i = Math.max(0, firstFlight); i <= lastFlight && lastFlight >= 0; i++) {
+        const ps = phaseScores[i];
+        const entry = { ...ps, originalIndices: [i], _originalIdx: i };
+        if (REPEATABLE.has(ps.name)) {
+            flightCounts[ps.name] = (flightCounts[ps.name] || 0) + 1;
+            entry._flightNum = flightCounts[ps.name];
+        }
+        display.push(entry);
+    }
+
+    // ── Post-landing block ───────────────────────────────────────────────
+    const postStart = lastFlight >= 0 ? lastFlight + 1 : preEnd;
+    const seenPost = new Map();
+    for (let i = postStart; i < phaseScores.length; i++) {
+        const ps = phaseScores[i];
+        if (!seenPost.has(ps.name)) {
+            const entry = {
+                name: ps.name, startIdx: ps.startIdx,
+                durationSec: ps.durationSec, distNm: ps.distNm,
+                score: ps.score, originalIndices: [i], _originalIdx: i,
+            };
+            seenPost.set(ps.name, entry);
+            display.push(entry);
+        } else {
+            const entry = seenPost.get(ps.name);
+            entry.durationSec += ps.durationSec;
+            entry.distNm = parseFloat((entry.distNm + ps.distNm).toFixed(1));
+            entry.score  = Math.round((entry.score * entry.originalIndices.length + ps.score) /
+                           (entry.originalIndices.length + 1));
+            entry.originalIndices.push(i);
+        }
+    }
+
+    return display;
+}
+
+function _displayLabel(entry) {
+    const base = PHASE_LABELS[entry.name] || entry.name;
+    if (entry._flightNum !== undefined) {
+        // Only add a number when this phase type appears more than once in-flight
+        return entry._flightNum > 1 || _flightTypeCount(entry) > 1
+            ? `${base} ${entry._flightNum}` : base;
+    }
+    return base;
+}
+
+// Count how many times a flight-phase type appears in the current display list.
+// Computed lazily per render; cheap for typical flight lengths.
+let _displayList = [];
+function _flightTypeCount(entry) {
+    return _displayList.filter(e => e.name === entry.name && e._flightNum !== undefined).length;
 }
 
 function _renderSidebar(phaseScores) {
     const el = document.getElementById('phase-sidebar');
     if (!el) return;
+
+    _displayList = _buildDisplayList(phaseScores);
 
     const disagreeCount  = phaseScores.filter(p => !p.mlAgreement && !p.pilotLabel).length;
     const confirmedCount = phaseScores.filter(p => p.pilotLabel !== null).length;
@@ -43,36 +143,46 @@ function _renderSidebar(phaseScores) {
     if (disagreeCount > 0)  headerParts.push(`<span class="disagree">${disagreeCount} disagreement${disagreeCount !== 1 ? 's' : ''}</span>`);
     if (confirmedCount > 0) headerParts.push(`<span class="confirmed">${confirmedCount} confirmed</span>`);
     const header = headerParts.length > 1
-        ? `<div class="ps-sidebar-header">${headerParts.join(' · ')}</div>`
-        : '';
+        ? `<div class="ps-sidebar-header">${headerParts.join(' · ')}</div>` : '';
 
-    const rows = phaseScores.map((ps, idx) => {
-        const label     = _numberedLabel(phaseScores, idx);
-        const effective = ps.pilotLabel ?? ps.name;
+    const rows = _displayList.map((entry, di) => {
+        const label     = _displayLabel(entry);
+        const origIdx   = entry._originalIdx;
+        const ps        = phaseScores[origIdx];
+        const effective = ps?.pilotLabel ?? entry.name;
+        const isGrouped = entry.originalIndices.length > 1;
 
+        // Badges: only on non-grouped entries (individual segments have ML labels)
         let badge = '';
-        if (ps.pilotLabel !== null) {
-            const txt = ps.pilotLabel !== ps.name
-                ? `✓ corrected: ${PHASE_LABELS[ps.pilotLabel] || ps.pilotLabel}`
-                : '✓ confirmed';
-            badge = `<div class="ps-confirmed-badge">${txt}</div>`;
-        } else if (!ps.mlAgreement) {
-            badge = `<div class="ps-ml-badge" data-correct="${idx}">⚠ ML: ${PHASE_LABELS[ps.mlLabel] || ps.mlLabel}</div>`;
+        if (!isGrouped && ps) {
+            if (ps.pilotLabel !== null) {
+                const txt = ps.pilotLabel !== ps.name
+                    ? `✓ corrected: ${PHASE_LABELS[ps.pilotLabel] || ps.pilotLabel}`
+                    : '✓ confirmed';
+                badge = `<div class="ps-confirmed-badge">${txt}</div>`;
+            } else if (!ps.mlAgreement) {
+                badge = `<div class="ps-ml-badge" data-correct="${origIdx}">⚠ ML: ${PHASE_LABELS[ps.mlLabel] || ps.mlLabel}</div>`;
+            }
         }
 
-        const correction = _openCorrectionIdx === idx ? _correctionPanel(ps, idx) : '';
+        // Correction panel: only on individual (non-grouped) entries
+        const correction = (!isGrouped && _openCorrectionIdx === origIdx)
+            ? _correctionPanel(ps, origIdx) : '';
+
+        const groupedNote = isGrouped
+            ? `<span style="font-size:0.68rem;color:var(--text-muted)"> ×${entry.originalIndices.length}</span>` : '';
 
         return `
-            <div class="ps-phase" data-idx="${idx}" data-start="${ps.startIdx}">
+            <div class="ps-phase" data-di="${di}" data-start="${entry.startIdx}" data-orig="${origIdx}">
               <div class="ps-phase-name">
                 <span class="ps-phase-icon">${PHASE_ICONS[effective] || '→'}</span>
-                <span>${label}</span>
+                <span>${label}${groupedNote}</span>
               </div>
-              <div class="ps-meta">${ps.distNm.toFixed(1)} nm · ${fmtDuration(ps.durationSec)}</div>
+              <div class="ps-meta">${entry.distNm.toFixed(1)} nm · ${fmtDuration(entry.durationSec)}</div>
               <div class="ps-score">
-                <span class="ps-score-badge ${scoreColor(ps.score)}">${ps.score}</span>
+                <span class="ps-score-badge ${scoreColor(entry.score)}">${entry.score}</span>
                 <div class="ps-score-bar">
-                  <div class="ps-score-fill" style="width:${ps.score}%;background:${scoreHex(ps.score)}"></div>
+                  <div class="ps-score-fill" style="width:${entry.score}%;background:${scoreHex(entry.score)}"></div>
                 </div>
               </div>
               ${badge}
@@ -93,7 +203,8 @@ function _renderSidebar(phaseScores) {
             }
             _openCorrectionIdx = -1;
             const startIdx = parseInt(row.dataset.start);
-            _onSeekCb?.(startIdx, parseInt(row.dataset.idx));
+            const origIdx  = parseInt(row.dataset.orig);
+            _onSeekCb?.(startIdx, origIdx);
         });
     });
 
@@ -146,10 +257,16 @@ export function initPhaseSidebar(phaseScores, onSeekCb, onCorrectCb) {
 }
 
 function _seekSidebar(rowIdx) {
-    if (!_phaseScores) return;
+    if (!_phaseScores || !_displayList.length) return;
     const el = document.getElementById('phase-sidebar');
     if (!el) return;
-    const active = _phaseScores.findIndex(ps => rowIdx >= ps.startIdx && rowIdx <= ps.endIdx);
+    // Find the display entry whose underlying segment contains rowIdx
+    const activeEntry = _displayList.findIndex(entry =>
+        entry.originalIndices.some(i => {
+            const ps = _phaseScores[i];
+            return rowIdx >= ps.startIdx && rowIdx <= ps.endIdx;
+        })
+    );
     el.querySelectorAll('.ps-phase').forEach((row, i) =>
-        row.classList.toggle('active', i === active));
+        row.classList.toggle('active', i === activeEntry));
 }
