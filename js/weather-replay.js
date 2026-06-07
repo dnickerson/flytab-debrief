@@ -22,7 +22,6 @@ const INTENSITY_COLORS = [
 let _map = null;
 let _data = null;   // { header, events }
 let _layers = {};
-let _activeRects = [];
 let _prefs = {};
 
 const WINDOWS = {
@@ -62,6 +61,11 @@ export function parseWeatherNDJSON(text) {
 }
 
 export function initWeather(weatherData, map) {
+    // Remove any previously added layers before reinitializing
+    for (const layer of Object.values(_layers)) {
+        if (_map && _map.hasLayer(layer)) _map.removeLayer(layer);
+    }
+
     _data = weatherData;
     _map = map;
 
@@ -112,13 +116,13 @@ export function getWeatherLayerVisible(key) {
 
 function _renderNexrad(T) {
     _layers.nexrad.clearLayers();
-    if (!_prefs.nexrad || !_data.events.nexrad.length) return;
+    if (_prefs.nexrad === false || !_data.events.nexrad.length) return;
 
     // Collect blocks visible at time T (received within last 15 min)
     // Use a Map to keep only the latest block per cell key
     const visible = new Map();
     for (const e of _data.events.nexrad) {
-        if (e.t > T) break;
+        if (e.t > T) break; // events are in ascending t order — NDJSON line order preserved by parser
         if (T - e.t > WINDOWS.nexrad) continue;
         for (const b of (e.blocks || [])) {
             const key = `${b.lat},${b.lon},${b.radarType}`;
@@ -154,7 +158,7 @@ const CAT_COLORS = { VFR: '#1a8c35', MVFR: '#0055bb', IFR: '#cc2222', LIFR: '#88
 
 function _renderMetar(T) {
     _layers.metar.clearLayers();
-    if (!_prefs.metar || !_data.events.metar.length) return;
+    if (_prefs.metar === false || !_data.events.metar.length) return;
 
     // Latest entry per ICAO at time T
     const latest = new Map();
@@ -175,7 +179,7 @@ const SEV_COLORS = ['#888', '#1a8c35', '#00cc99', '#ffcc00', '#ff8800', '#cc2222
 
 function _renderPirep(T) {
     _layers.pirep.clearLayers();
-    if (!_prefs.pirep || !_data.events.pirep.length) return;
+    if (_prefs.pirep === false || !_data.events.pirep.length) return;
 
     for (const e of _data.events.pirep) {
         if (e.t > T || T - e.t > WINDOWS.pirep) continue;
@@ -192,7 +196,7 @@ function _renderPirep(T) {
         const altLabel = e.altitude ? `${e.altitude.toLocaleString()}ft` : '';
         L.marker([e.lat, e.lon], { icon })
             .bindPopup(`<div style="font-family:var(--font-ui);min-width:200px">
-                <b>${urgentBadge}${typeLabel.toUpperCase()}</b> ${sevLabel}<br>
+                <b>${urgentBadge}${_esc(typeLabel).toUpperCase()}</b> ${sevLabel}<br>
                 ${altLabel}<br>
                 <small style="white-space:pre-wrap">${_esc(e.raw)}</small>
             </div>`)
@@ -209,16 +213,18 @@ const ADVISORY_STYLES = {
 };
 
 function _isExpired(e, T) {
+    if (!_data?.header?.t0) return false;
     if (!e.expires_at) return false;
     const expiresT = Math.floor(new Date(e.expires_at).getTime() / 1000);
-    const t0       = _data.header.t0;
-    return (expiresT - t0) < T;
+    if (isNaN(expiresT)) return false;
+    // Compare wall-clock expires_at against flight-relative T (both in seconds from t0)
+    return (expiresT - _data.header.t0) < T;
 }
 
 function _renderSigmetAirmetCwa(T) {
     for (const key of ['sigmet', 'airmet', 'cwa']) {
         _layers[key].clearLayers();
-        if (!_prefs[key]) continue;
+        if (_prefs[key] === false) continue;
         const wind = WINDOWS[key];
         const style = ADVISORY_STYLES[key];
         for (const e of (_data.events[key] || [])) {
@@ -228,6 +234,7 @@ function _renderSigmetAirmetCwa(T) {
             if (!e.points || e.points.length < 3) continue;
             const label = key.toUpperCase();
             const expiry = e.expires_at ? `Expires ${e.expires_at.slice(11, 16)}Z` : '';
+            // points: [[lat, lon], ...] — Leaflet order, stored as-is from fisb-client.js _extractPolygonPoints
             L.polygon(e.points, { color: style.color, weight: 1.5,
                 fillColor: style.color, fillOpacity: style.fillOpacity })
                 .bindPopup(`<div style="font-family:var(--font-ui);max-width:320px">
@@ -243,7 +250,7 @@ function _renderSigmetAirmetCwa(T) {
 
 function _renderWinds(T) {
     _layers.winds.clearLayers();
-    if (!_prefs.winds || !_data.events.winds.length) return;
+    if (_prefs.winds === false || !_data.events.winds.length) return;
 
     // Latest per station+alt at time T
     const latest = new Map();
@@ -255,7 +262,8 @@ function _renderWinds(T) {
 
     for (const w of latest.values()) {
         if (w.lat == null || w.lon == null) continue;
-        const rot = (w.dir || 0);
+        // Rotate arrow to direction of flow (wind blows FROM w.dir, so arrow points TO w.dir+180)
+        const rot = ((w.dir || 0) + 180) % 360;
         const icon = L.divIcon({
             className: '',
             html: `<div style="transform:rotate(${rot}deg);font-size:1rem;line-height:1;color:#1a1a2e">↑</div>
@@ -263,7 +271,7 @@ function _renderWinds(T) {
             iconSize: [40, 28], iconAnchor: [20, 8],
         });
         L.marker([w.lat, w.lon], { icon })
-            .bindPopup(`<b>${w.station}</b> ${(w.alt||0).toLocaleString()}ft<br>${w.dir}° @ ${w.spd}kt, ${w.temp}°C`)
+            .bindPopup(`<b>${w.station}</b> ${(w.alt||0).toLocaleString()}ft<br>${w.dir}° @ ${w.spd}kt, ${w.temp ?? '—'}°C`)
             .addTo(_layers.winds);
     }
 }
@@ -272,7 +280,7 @@ function _renderWinds(T) {
 
 function _renderNotam(T) {
     _layers.notam.clearLayers();
-    if (!_prefs.notam || !_data.events.notam.length) return;
+    if (_prefs.notam === false || !_data.events.notam.length) return;
 
     for (const e of _data.events.notam) {
         if (e.t > T) continue;
@@ -285,7 +293,7 @@ function _renderNotam(T) {
                 fillColor: '#cc2222', fillOpacity: 0.08,
                 dashArray: '6,4',
             })
-                .bindPopup(`<b>TFR</b><br><small>${_esc(e.raw.slice(0, 200))}</small>`)
+                .bindPopup(`<b>TFR</b><br><small>${_esc((e.raw || '').slice(0, 200))}</small>`)
                 .addTo(_layers.notam);
         }
     }
