@@ -35,6 +35,7 @@ async function loadFlightList() {
         <div class="flight-item" data-name="${escHtml(f.name)}">
           <span class="flight-item-name">${escHtml(f.name)}</span>
           ${f.hasTraffic ? '<span class="flight-item-badge">+ TRAFFIC</span>' : ''}
+          ${f.hasWeather ? '<span class="flight-item-badge weather-badge">+ WEATHER</span>' : ''}
         </div>
     `).join('');
     list.querySelectorAll('.flight-item').forEach(el =>
@@ -197,6 +198,7 @@ async function openFlight(filename) {
     initScorePanel(fd, phaseScores, events, thr);
     initReplay(fd, trafficData, phaseScores);
     if (_weatherData) initWeather(_weatherData, window._replayMap);
+    _wireWeatherMenu();
     initEngineCluster(fd, thr);
     initCharts(fd, phaseScores);
     initAiReview(fd, scores, phaseScores, events, trafficData);
@@ -304,6 +306,32 @@ function wireScrubber(fd, events, phaseScores) {
         window._phaseSidebar?.seek(idx);
         window._engineCluster?.seek(idx);
         if (_weatherData) renderWeather(idx);
+    });
+}
+
+function _wireWeatherMenu() {
+    const btn  = document.getElementById('weather-menu-btn');
+    const menu = document.getElementById('weather-menu');
+    if (!btn || !menu || !_weatherData) return;
+
+    btn.classList.remove('hidden');
+
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        menu.classList.toggle('hidden');
+    });
+    document.addEventListener('click', (e) => {
+        if (!menu.contains(e.target) && e.target !== btn) menu.classList.add('hidden');
+    });
+
+    menu.querySelectorAll('input[type=checkbox]').forEach(cb => {
+        const key = cb.dataset.wx;
+        cb.checked = getWeatherLayerVisible(key);
+        cb.addEventListener('change', () => {
+            setWeatherLayerVisible(key, cb.checked);
+            const scrubber = document.getElementById('scrubber');
+            if (scrubber) renderWeather(parseInt(scrubber.value));
+        });
     });
 }
 

@@ -58,6 +58,19 @@
             <label class="tm-row"><span>Altitude band color</span><input type="checkbox" data-field="altColor" checked></label>
             <label class="tm-row"><span>Proximity ring</span><input type="checkbox" data-field="proxRing" checked></label>
           </div>
+          <!-- Weather layer toggle -->
+          <button id="weather-menu-btn" class="weather-menu-btn hidden">WX ⚙</button>
+          <div id="weather-menu" class="weather-menu hidden">
+            <div class="tm-title">WEATHER LAYERS</div>
+            <label class="tm-row"><span>NEXRAD</span><input type="checkbox" data-wx="nexrad" checked></label>
+            <label class="tm-row"><span>METARs</span><input type="checkbox" data-wx="metar" checked></label>
+            <label class="tm-row"><span>PIREPs</span><input type="checkbox" data-wx="pirep" checked></label>
+            <label class="tm-row"><span>SIGMETs</span><input type="checkbox" data-wx="sigmet" checked></label>
+            <label class="tm-row"><span>AIRMETs</span><input type="checkbox" data-wx="airmet" checked></label>
+            <label class="tm-row"><span>CWAs</span><input type="checkbox" data-wx="cwa" checked></label>
+            <label class="tm-row"><span>Winds</span><input type="checkbox" data-wx="winds"></label>
+            <label class="tm-row"><span>NOTAMs</span><input type="checkbox" data-wx="notam" checked></label>
+          </div>
         </div>
         <div id="engine-cluster" class="engine-cluster hidden"></div>
       </div>
