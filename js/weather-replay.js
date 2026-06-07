@@ -180,7 +180,7 @@ function _renderPirep(T) {
     for (const e of _data.events.pirep) {
         if (e.t > T || T - e.t > WINDOWS.pirep) continue;
         if (e.lat == null || e.lon == null) continue;
-        const color = SEV_COLORS[Math.min(e.severity || 1, 5)];
+        const color = SEV_COLORS[Math.min(e.severity ?? 1, 5)];
         const icon = L.divIcon({
             className: '',
             html: `<div style="width:12px;height:12px;background:${color};transform:rotate(45deg);border:1px solid #000;opacity:0.85"></div>`,
