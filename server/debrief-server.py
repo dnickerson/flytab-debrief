@@ -98,7 +98,8 @@ class Handler(BaseHTTPRequestHandler):
         FLIGHTS_DIR.mkdir(parents=True, exist_ok=True)
         files = sorted(FLIGHTS_DIR.glob('*.csv'), reverse=True)
         result = [{'name': f.name,
-                   'hasTraffic': (FLIGHTS_DIR / (f.stem + '_traffic.ndjson')).exists()}
+                   'hasTraffic': (FLIGHTS_DIR / (f.stem + '_traffic.ndjson')).exists(),
+                   'hasWeather': (FLIGHTS_DIR / (f.stem + '_weather.ndjson')).exists()}
                   for f in files]
         self._json(result)
 
