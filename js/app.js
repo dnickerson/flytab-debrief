@@ -18,6 +18,7 @@ import { parseWeatherNDJSON, initWeather, renderWeather, setWeatherLayerVisible,
 const API = '';
 
 let _weatherData = null;
+let _wxMenuWired = false;
 
 function escHtml(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -73,6 +74,7 @@ async function openFlight(filename) {
     } catch (_) {}
 
     _weatherData = null;
+    _wxMenuWired = false;
     const weatherFilename = filename.replace(/\.csv$/, '_weather.ndjson');
     try {
         const wr = await fetch(`${API}/api/flights/${encodeURIComponent(weatherFilename)}`);
@@ -312,7 +314,13 @@ function wireScrubber(fd, events, phaseScores) {
 function _wireWeatherMenu() {
     const btn  = document.getElementById('weather-menu-btn');
     const menu = document.getElementById('weather-menu');
-    if (!btn || !menu || !_weatherData) return;
+    if (!btn || !menu) return;
+    if (!_weatherData) {
+        btn.classList.add('hidden');
+        return;
+    }
+    if (_wxMenuWired) return;
+    _wxMenuWired = true;
 
     btn.classList.remove('hidden');
 
