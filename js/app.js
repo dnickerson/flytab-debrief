@@ -13,8 +13,11 @@ import { initVspeeds, getVspeeds } from './vspeeds.js';
 import { initAiReview }           from './ai-review.js';
 import { applyAirspeeds }         from './flight-physics.js';
 import { detectPhases }            from './phase-detector.js';
+import { parseWeatherNDJSON, initWeather, renderWeather, setWeatherLayerVisible, getWeatherLayerVisible } from './weather-replay.js';
 
 const API = '';
+
+let _weatherData = null;
 
 function escHtml(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -65,6 +68,16 @@ async function openFlight(filename) {
             trafficData.proximityEvents = computeProximityEvents(
                 trafficData.snapshots, fd.lat, fd.lon, fd.altFt
             );
+        }
+    } catch (_) {}
+
+    _weatherData = null;
+    const weatherFilename = filename.replace(/\.csv$/, '_weather.ndjson');
+    try {
+        const wr = await fetch(`${API}/api/flights/${encodeURIComponent(weatherFilename)}`);
+        if (wr.ok) {
+            const ndjson = await wr.text();
+            _weatherData = parseWeatherNDJSON(ndjson);
         }
     } catch (_) {}
 
@@ -183,6 +196,7 @@ async function openFlight(filename) {
 
     initScorePanel(fd, phaseScores, events, thr);
     initReplay(fd, trafficData, phaseScores);
+    if (_weatherData) initWeather(_weatherData, window._replayMap);
     initEngineCluster(fd, thr);
     initCharts(fd, phaseScores);
     initAiReview(fd, scores, phaseScores, events, trafficData);
@@ -289,6 +303,7 @@ function wireScrubber(fd, events, phaseScores) {
         window._scorePanel?.seek(idx);
         window._phaseSidebar?.seek(idx);
         window._engineCluster?.seek(idx);
+        if (_weatherData) renderWeather(idx);
     });
 }
 

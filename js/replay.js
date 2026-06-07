@@ -19,6 +19,7 @@ export function initReplay(fd, trafficData, phaseScores) {
 
     if (!_map) {
         _map = L.map('map', { zoomControl: true });
+        window._replayMap = _map;
 
         const TILE_BASE = 'http://192.168.1.77:8090/tiles';
         const sectional = L.tileLayer(`${TILE_BASE}/sectional/{z}/{x}/{y}.webp`, {
