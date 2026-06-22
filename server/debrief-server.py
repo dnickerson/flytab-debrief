@@ -94,11 +94,28 @@ class Handler(BaseHTTPRequestHandler):
 
     # ── routes ───────────────────────────────────────────────────────────────
 
+    def _find_traffic_file(self, stem):
+        """Return Path to traffic ndjson for a CSV stem, or None.
+        Tries exact match first, then falls back to any traffic file
+        sharing the same YYYYMMDD date prefix (handles the case where
+        FlyTab renamed the CSV to a route name but the traffic rename
+        failed, leaving the original time-based name on disk).
+        """
+        exact = FLIGHTS_DIR / (stem + '_traffic.ndjson')
+        if exact.exists():
+            return exact
+        date_prefix = stem[:8]
+        if len(date_prefix) == 8 and date_prefix.isdigit():
+            matches = sorted(FLIGHTS_DIR.glob(f'{date_prefix}_*_traffic.ndjson'))
+            if matches:
+                return matches[0]
+        return None
+
     def _list_flights(self):
         FLIGHTS_DIR.mkdir(parents=True, exist_ok=True)
         files = sorted(FLIGHTS_DIR.glob('*.csv'), reverse=True)
         result = [{'name': f.name,
-                   'hasTraffic': (FLIGHTS_DIR / (f.stem + '_traffic.ndjson')).exists(),
+                   'hasTraffic': self._find_traffic_file(f.stem) is not None,
                    'hasWeather': (FLIGHTS_DIR / (f.stem + '_weather.ndjson')).exists()}
                   for f in files]
         self._json(result)
@@ -106,7 +123,18 @@ class Handler(BaseHTTPRequestHandler):
     def _serve_flight(self, name):
         if not self._safe_name(name): return self._err(404)
         path = FLIGHTS_DIR / name
-        if not path.exists(): return self._err(404)
+        if not path.exists():
+            # Traffic file fallback: if the exact name isn't found, look for a
+            # same-date match (handles CSV rename succeeding when traffic rename failed)
+            if name.endswith('_traffic.ndjson'):
+                stem = name[:-len('_traffic.ndjson')]
+                found = self._find_traffic_file(stem)
+                if found:
+                    path = found
+                else:
+                    return self._err(404)
+            else:
+                return self._err(404)
         ct = 'text/csv' if name.endswith('.csv') else 'application/x-ndjson'
         data = path.read_bytes()
         self.send_response(200)
