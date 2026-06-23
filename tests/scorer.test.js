@@ -43,6 +43,32 @@ describe('scoreEngineMgmt', () => {
         const s = scoreEngineMgmt(redFD, THRESHOLDS);
         expect(s.mixture).toBeLessThanOrEqual(20);
     });
+
+    // Regression: CHT-ROC limit must come from the resolved envelope (default 60),
+    // not a hardcoded 50. 55°F/min at high power is normal climb heating and must
+    // not be penalized under the default limit; a tighter config must penalize it.
+    it('honors the configurable CHT-ROC limit', () => {
+        const rocFD = { ...fd,
+            pctPower: new Float32Array(10).fill(70),
+            chtRoc: [new Float32Array(10).fill(55), new Float32Array(10),
+                     new Float32Array(10), new Float32Array(10)],
+            mlPhase: Array(10).fill('cruise'),
+        };
+        expect(scoreEngineMgmt(rocFD, {}).chtRoc).toBe(100);                    // default limit 60
+        expect(scoreEngineMgmt(rocFD, { chtRocLimit: 50 }).chtRoc).toBeLessThan(100);
+    });
+
+    // Regression: EGT-spread band comes from the resolved envelope (100/140), so a
+    // 115°F cruise spread is a warn (partial credit), not an automatic zero.
+    it('honors the configurable EGT-spread band', () => {
+        const egtFD = { ...fd,
+            egt: [new Float32Array(10).fill(1400), new Float32Array(10).fill(1400),
+                  new Float32Array(10).fill(1400), new Float32Array(10).fill(1285)], // spread 115
+            mlPhase: Array(10).fill('cruise'),
+        };
+        expect(scoreEngineMgmt(egtFD, {}).egtBalance).toBeGreaterThan(0);       // 115 in 100–140 warn band
+        expect(scoreEngineMgmt(egtFD, { egtSpreadCaution: 50, egtSpreadDanger: 100 }).egtBalance).toBe(0);
+    });
 });
 
 describe('scoreAirmanship', () => {

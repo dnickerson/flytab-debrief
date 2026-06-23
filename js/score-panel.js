@@ -60,8 +60,8 @@ export function seek(rowIdx) {
     const mixStatus = opCond ? 'pass' : (phaseName === 'cruise' ? 'warn' : 'pass');
 
     const oilTemp   = _fd.oilTemp[rowIdx];
-    const oilMin    = thr.oilTempMin || 100;
-    const oilMax    = thr.oilTempMax || 245;
+    const oilMin    = L.oilTempMin;
+    const oilMax    = L.oilTempMax;
     const oilStatus = oilTemp > 0 ? (oilTemp > oilMax ? 'fail' : oilTemp < oilMin ? 'warn' : 'pass') : 'pass';
 
     // Approach parameters
