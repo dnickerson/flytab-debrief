@@ -304,7 +304,7 @@ class Handler(BaseHTTPRequestHandler):
         fp = STATIC_DIR / path.lstrip('/')
         # Guard: block any traversal outside the repo root
         try:
-            fp.resolve().relative_to(STATIC_DIR.resolve())
+            rel = fp.resolve().relative_to(STATIC_DIR.resolve())
         except ValueError:
             return self._err(404)
         if not fp.exists() or not fp.is_file():
@@ -313,6 +313,14 @@ class Handler(BaseHTTPRequestHandler):
         data = fp.read_bytes()
         self.send_response(200)
         self.send_header('Content-Type', ct or 'application/octet-stream')
+        # Cache policy by location. Vendored libs (lib/) are large and change rarely,
+        # so let the browser cache them. The app's own source (js/, css/, html) is
+        # actively edited and BaseHTTPRequestHandler emits no ETag/Last-Modified, so
+        # the browser was serving stale ES modules — force revalidation there.
+        if str(rel).startswith('lib/'):
+            self.send_header('Cache-Control', 'max-age=86400')
+        else:
+            self.send_header('Cache-Control', 'no-store, must-revalidate')
         self._cors(); self.end_headers()
         self.wfile.write(data)
 

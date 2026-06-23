@@ -12,7 +12,8 @@ import { initEngineCluster }      from './engine-cluster.js';
 import { initVspeeds, getVspeeds } from './vspeeds.js';
 import { initAiReview }           from './ai-review.js';
 import { applyAirspeeds }         from './flight-physics.js';
-import { detectPhases }            from './phase-detector.js';
+import { detectPhases }            from './phase-detector-fsm.js'; // was './phase-detector.js'
+import { ENGINE_LIMITS }           from './engine-limits.js';
 import { parseWeatherNDJSON, initWeather, renderWeather, setWeatherLayerVisible, getWeatherLayerVisible } from './weather-replay.js';
 
 const API = '';
@@ -211,17 +212,20 @@ async function openFlight(filename) {
 }
 
 async function loadThresholds() {
+    // ENGINE_LIMITS is the single source of truth for the engine envelope (see
+    // js/engine-limits.js). aircraft-config.json carries no engine limits, so the
+    // envelope governs; the fetched config overrides only what it specifies
+    // (V-speeds, SFC, etc.). V-speed defaults that aren't engine limits live here.
+    const defaults = {
+        ...ENGINE_LIMITS,
+        vnoKias: 165, vneKias: 202, vs1Kias: 50, vrefKias: 65,
+    };
     try {
         const r = await fetch('http://192.168.1.77:8090/aircraft-config.json',
             { signal: AbortSignal.timeout(2000) });
-        if (r.ok) return await r.json();
+        if (r.ok) return { ...defaults, ...(await r.json()) };
     } catch (_) {}
-    return {
-        chtCaution: 380, chtDanger: 435, egtDanger: 1650,
-        oilTempMin: 100, oilTempMax: 245,
-        vnoKias: 165, vneKias: 202, vs1Kias: 50, vrefKias: 65,
-        typicalSfc: 0.42,
-    };
+    return defaults;
 }
 
 async function fetchMETARs(fd) {
