@@ -13,6 +13,7 @@ import { initVspeeds, getVspeeds } from './vspeeds.js';
 import { initAiReview }           from './ai-review.js';
 import { applyAirspeeds }         from './flight-physics.js';
 import { detectPhases }            from './phase-detector-fsm.js'; // was './phase-detector.js'
+import { ENGINE_LIMITS }           from './engine-limits.js';
 import { parseWeatherNDJSON, initWeather, renderWeather, setWeatherLayerVisible, getWeatherLayerVisible } from './weather-replay.js';
 
 const API = '';
@@ -211,17 +212,13 @@ async function openFlight(filename) {
 }
 
 async function loadThresholds() {
-    // Engine envelope for N194JT (O-360-A1A), data-derived from 37 flights:
-    // CHT optimal 380°F / max-ever 402°F; cruise EGT spread p95 99°F / max 139°F;
-    // |CHT ROC| p99 53°F/min. aircraft-config.json carries no engine limits, so these
-    // defaults govern the engine envelope; the fetched config overrides only what it
-    // specifies (V-speeds, SFC, etc.). Matching fallbacks live in scorer.js/score-panel.js.
+    // ENGINE_LIMITS is the single source of truth for the engine envelope (see
+    // js/engine-limits.js). aircraft-config.json carries no engine limits, so the
+    // envelope governs; the fetched config overrides only what it specifies
+    // (V-speeds, SFC, etc.). V-speed defaults that aren't engine limits live here.
     const defaults = {
-        chtCaution: 420, chtDanger: 450, egtDanger: 1650,
-        egtSpreadCaution: 100, egtSpreadDanger: 140, chtRocLimit: 60,
-        oilTempMin: 100, oilTempMax: 245,
+        ...ENGINE_LIMITS,
         vnoKias: 165, vneKias: 202, vs1Kias: 50, vrefKias: 65,
-        typicalSfc: 0.42,
     };
     try {
         const r = await fetch('http://192.168.1.77:8090/aircraft-config.json',

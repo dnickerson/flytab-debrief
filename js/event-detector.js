@@ -1,7 +1,10 @@
 // js/event-detector.js
+import { resolveLimits } from './engine-limits.js';
+
 export function detectEvents(fd, trafficData, thr) {
     const events = [];
     const n = fd.rows;
+    const L = resolveLimits(thr);   // engine envelope, single source of truth
     const DMMS = 1.404 * (thr.vs1Kias || 50);
 
     // CHT caution / danger — debounce: emit once per exceedance block
@@ -9,10 +12,10 @@ export function detectEvents(fd, trafficData, thr) {
         let cauBlock = false, danBlock = false;
         for (let i = 0; i < n; i++) {
             const v = fd.cht[cyl][i];
-            if (v > (thr.chtDanger || 435)) {
+            if (v > L.chtDanger) {
                 if (!danBlock) { events.push(_ev(i, 'CHT_DANGER', 'red', `CHT${cyl+1} ${v}°F`)); danBlock = true; }
             } else { danBlock = false; }
-            if (v > (thr.chtCaution || 380) && v <= (thr.chtDanger || 435)) {
+            if (v > L.chtCaution && v <= L.chtDanger) {
                 if (!cauBlock) { events.push(_ev(i, 'CHT_CAUTION', 'orange', `CHT${cyl+1} ${v}°F`)); cauBlock = true; }
             } else { cauBlock = false; }
         }
@@ -84,12 +87,12 @@ export function detectEvents(fd, trafficData, thr) {
         }
     }
 
-    // CHT ROC caution: sustained >50°F/min at >65% power for 30s
+    // CHT ROC caution: sustained above the ROC limit at >65% power for 30s
     if (fd.chtRoc) {
         for (let cyl = 0; cyl < 4; cyl++) {
             let streak = 0;
             for (let i = 0; i < n; i++) {
-                if (fd.pctPower[i] > 65 && Math.abs(fd.chtRoc[cyl][i]) > 50) {
+                if (fd.pctPower[i] > 65 && Math.abs(fd.chtRoc[cyl][i]) > L.chtRocLimit) {
                     streak++;
                     if (streak === 30) {
                         events.push(_ev(i, 'CHT_ROC_CAUTION', 'orange',

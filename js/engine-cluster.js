@@ -1,4 +1,5 @@
 // js/engine-cluster.js
+import { resolveLimits } from './engine-limits.js';
 
 let _fd = null, _thr = null;
 
@@ -18,10 +19,8 @@ export function initEngineCluster(fd, thr) {
 
 export function seek(idx) {
     if (!_fd) return;
-    const thr = _thr || {};
-    const chtCaution = thr.chtCaution || 380;
-    const chtDanger  = thr.chtDanger  || 435;
-    const egtDanger  = thr.egtDanger  || 1650;
+    const L = resolveLimits(_thr);   // engine envelope, single source of truth
+    const chtCaution = L.chtCaution, chtDanger = L.chtDanger, egtDanger = L.egtDanger;
 
     const egtGrid = document.getElementById('egt-grid');
     const chtGrid = document.getElementById('cht-grid');
@@ -44,7 +43,7 @@ export function seek(idx) {
         const v   = _fd.cht[c][idx];
         const roc = _fd.chtRoc ? _fd.chtRoc[c][idx] : null;
         const rocStr = roc !== null ? `${roc >= 0 ? '+' : ''}${roc.toFixed(0)}°/min` : '';
-        const rocWarn = roc !== null && _fd.pctPower[idx] > 65 && Math.abs(roc) > 50;
+        const rocWarn = roc !== null && _fd.pctPower[idx] > 65 && Math.abs(roc) > L.chtRocLimit;
         const cls = v > chtDanger ? 'danger' : v > chtCaution ? 'caution' : '';
         return `<div class="ec-tile ${cls}">
           <div class="ec-tile-label">CHT ${c+1}</div>

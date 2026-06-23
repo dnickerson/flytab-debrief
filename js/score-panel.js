@@ -1,4 +1,5 @@
 // js/score-panel.js
+import { resolveLimits } from './engine-limits.js';
 
 let _fd = null, _phaseScores = null, _events = null, _thr = null;
 
@@ -25,13 +26,10 @@ export function seek(rowIdx) {
         : '--:--:--Z';
 
     const thr = _thr || {};
-    // Engine envelope for N194JT (O-360-A1A), data-derived from 37 flights.
-    // 380°F is this engine's CHT *optimal*, not a caution; max CHT ever seen is 402°F.
-    const chtCaution = thr.chtCaution ?? 420;
-    const chtDanger  = thr.chtDanger  ?? 450;
-    const egtSpreadC = thr.egtSpreadCaution ?? 100;  // cruise p95 ≈ 99°F
-    const egtSpreadD = thr.egtSpreadDanger  ?? 140;  // cruise max ≈ 139°F
-    const rocLim     = thr.chtRocLimit ?? 60;        // |ROC| p99 ≈ 53°F/min
+    const L = resolveLimits(thr);   // engine envelope, single source of truth
+    const chtCaution = L.chtCaution, chtDanger = L.chtDanger;
+    const egtSpreadC = L.egtSpreadCaution, egtSpreadD = L.egtSpreadDanger;
+    const rocLim     = L.chtRocLimit;
     const vno = thr.vnoKias || 165;
     const vne = thr.vneKias || 202;
 

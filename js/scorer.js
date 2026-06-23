@@ -1,4 +1,6 @@
 // js/scorer.js
+import { resolveLimits } from './engine-limits.js';
+
 export function colorForScore(s) {
     return s >= 80 ? 'green' : s >= 60 ? 'yellow' : 'red';
 }
@@ -49,14 +51,15 @@ export function computeChtRoc(fd) {
 
 export function scoreEngineMgmt(fd, thr) {
     const n = fd.rows;
+    const L = resolveLimits(thr);
 
     // CHT: deduct 0.5/s above caution, 2.0/s above danger
     let chtScore = 100;
     for (let i = 0; i < n; i++) {
         for (let c = 0; c < 4; c++) {
             const v = fd.cht[c][i];
-            if (v > thr.chtDanger)  chtScore -= 2.0;
-            else if (v > thr.chtCaution) chtScore -= 0.5;
+            if (v > L.chtDanger)  chtScore -= 2.0;
+            else if (v > L.chtCaution) chtScore -= 0.5;
         }
     }
     chtScore = clamp(chtScore);
@@ -70,13 +73,11 @@ export function scoreEngineMgmt(fd, thr) {
             return vals.length > 1 ? Math.max(...vals) - Math.min(...vals) : 0;
         });
         const mean = avg(spreads);
-        // EGT-spread envelope for N194JT (carbureted O-360-A1A), data-derived from
-        // 37 flights: cruise spread median 63°F, p95 99°F, p99 116°F, max 139°F.
-        // The old 50/100°F band flagged ~75% of normal flights.
-        const egtC = thr.egtSpreadCaution ?? 100, egtD = thr.egtSpreadDanger ?? 140;
+        const egtC = L.egtSpreadCaution, egtD = L.egtSpreadDanger;
+        const span = Math.max(1, egtD - egtC);   // guard misconfig where egtD <= egtC
         egtScore = mean <= egtC ? 100
                  : mean >= egtD ? 0
-                 : clamp(100 - (mean - egtC) * (100 / (egtD - egtC)));
+                 : clamp(100 - (mean - egtC) * (100 / span));
     }
 
     // Mixture: % cruise rows with defined condition; red box = hard floor 20
@@ -93,7 +94,7 @@ export function scoreEngineMgmt(fd, thr) {
     let oilInRange = 0;
     for (let i = 0; i < n; i++) {
         const v = fd.oilTemp[i];
-        if (v > 0 && v >= (thr.oilTempMin || 100) && v <= (thr.oilTempMax || 245)) oilInRange++;
+        if (v > 0 && v >= L.oilTempMin && v <= L.oilTempMax) oilInRange++;
     }
     const oilScore = clamp((oilInRange / n) * 100);
 
@@ -107,18 +108,16 @@ export function scoreEngineMgmt(fd, thr) {
 
     // Fuel efficiency: actual vs expected SFC
     let ffScore = 100;
-    if (thr.typicalSfc && cruiseIdxs.length) {
+    if (L.typicalSfc && cruiseIdxs.length) {
         const sfcVals = cruiseIdxs.map(i => fd.sfc[i]).filter(v => v > 0);
         if (sfcVals.length) {
-            const pctDiff = Math.abs(avg(sfcVals) - thr.typicalSfc) / thr.typicalSfc * 100;
+            const pctDiff = Math.abs(avg(sfcVals) - L.typicalSfc) / L.typicalSfc * 100;
             ffScore = clamp(100 - Math.max(0, pctDiff - 5) * 5);
         }
     }
 
     // CHT ROC: deduct when any cylinder exceeds the limit at >65% power.
-    // Data-derived (37 flights, RPM>2300): |ROC| median 0, p95 27, p99 53°F/min.
-    // Climb heating up to ~55°F/min is normal; 60 flags only the genuine top ~0.5%.
-    const rocLim = thr.chtRocLimit ?? 60;
+    const rocLim = L.chtRocLimit;
     let chtRocScore = 100;
     if (fd.chtRoc) {
         for (let i = 0; i < n; i++) {
@@ -248,6 +247,7 @@ function _scoreOneApproach(fd, seg, thr) {
 // Returns array of {name, startIdx, endIdx, durationSec, distNm, score}
 // for each phase segment in fd.phases.
 export function scorePhases(fd, thr, trafficData) {
+    const L = resolveLimits(thr);
     return fd.phases.map(seg => {
         const effectiveName = seg.pilotLabel ?? seg.name;
         const n = seg.endIdx - seg.startIdx + 1;
@@ -269,7 +269,7 @@ export function scorePhases(fd, thr, trafficData) {
         let chtOk = 0;
         for (let i = seg.startIdx; i <= seg.endIdx; i++) {
             const maxCht = Math.max(fd.cht[0][i], fd.cht[1][i], fd.cht[2][i], fd.cht[3][i]);
-            if (maxCht <= (thr.chtCaution ?? 420)) chtOk++;
+            if (maxCht <= L.chtCaution) chtOk++;
         }
         const chtScore = clamp((chtOk / n) * 100);
 
@@ -279,7 +279,7 @@ export function scorePhases(fd, thr, trafficData) {
             rocOk = 0;
             for (let i = seg.startIdx; i <= seg.endIdx; i++) {
                 const maxRoc = Math.max(...[0,1,2,3].map(c => Math.abs(fd.chtRoc[c][i])));
-                if (fd.pctPower[i] <= 65 || maxRoc <= 50) rocOk++;
+                if (fd.pctPower[i] <= 65 || maxRoc <= L.chtRocLimit) rocOk++;
             }
         }
         const rocScore = clamp((rocOk / n) * 100);

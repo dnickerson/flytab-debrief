@@ -37,6 +37,8 @@
 // richer states in the UI later, add icons/labels for them in phase-sidebar.js
 // and remove their entries from DISPLAY_NAME — nothing else changes.
 
+import { haversineNm } from './csv-parser.js';
+
 // ── Tunables (RV-9A / O-360-A1A) ────────────────────────────────────────────
 const RPM_SHUTDOWN   = 50;     // engine stopped
 const RPM_RUNUP      = 1700;   // run-up / mag check RPM
@@ -235,7 +237,7 @@ function _gpsMoving(fd, n) {
     for (let i = 0; i < n; i++) {
         const j = Math.max(0, i - GPS_MOVE_WIN);
         if (!fd.lat[i] || !fd.lon[i] || !fd.lat[j] || !fd.lon[j]) continue;
-        moving[i] = _haversineNm(fd.lat[j], fd.lon[j], fd.lat[i], fd.lon[i]) > GPS_MOVE_NM ? 1 : 0;
+        moving[i] = haversineNm(fd.lat[j], fd.lon[j], fd.lat[i], fd.lon[i]) > GPS_MOVE_NM ? 1 : 0;
     }
     return moving;
 }
@@ -310,20 +312,11 @@ function _mode(arr, start, end) {
     return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'cruise';
 }
 
-function _haversineNm(lat1, lon1, lat2, lon2) {
-    const R = 3440.065;
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) ** 2 +
-        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
 function _distNm(fd, start, end) {
     let total = 0;
     for (let i = start + 1; i <= end; i++) {
         if (!fd.lat[i] || !fd.lon[i] || !fd.lat[i - 1] || !fd.lon[i - 1]) continue;
-        total += _haversineNm(fd.lat[i - 1], fd.lon[i - 1], fd.lat[i], fd.lon[i]);
+        total += haversineNm(fd.lat[i - 1], fd.lon[i - 1], fd.lat[i], fd.lon[i]);
     }
     return parseFloat(total.toFixed(1));
 }
