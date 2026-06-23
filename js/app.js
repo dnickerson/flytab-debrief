@@ -12,7 +12,7 @@ import { initEngineCluster }      from './engine-cluster.js';
 import { initVspeeds, getVspeeds } from './vspeeds.js';
 import { initAiReview }           from './ai-review.js';
 import { applyAirspeeds }         from './flight-physics.js';
-import { detectPhases }            from './phase-detector.js';
+import { detectPhases }            from './phase-detector-fsm.js'; // was './phase-detector.js'
 import { parseWeatherNDJSON, initWeather, renderWeather, setWeatherLayerVisible, getWeatherLayerVisible } from './weather-replay.js';
 
 const API = '';
@@ -211,17 +211,24 @@ async function openFlight(filename) {
 }
 
 async function loadThresholds() {
-    try {
-        const r = await fetch('http://192.168.1.77:8090/aircraft-config.json',
-            { signal: AbortSignal.timeout(2000) });
-        if (r.ok) return await r.json();
-    } catch (_) {}
-    return {
-        chtCaution: 380, chtDanger: 435, egtDanger: 1650,
+    // Engine envelope for N194JT (O-360-A1A), data-derived from 37 flights:
+    // CHT optimal 380°F / max-ever 402°F; cruise EGT spread p95 99°F / max 139°F;
+    // |CHT ROC| p99 53°F/min. aircraft-config.json carries no engine limits, so these
+    // defaults govern the engine envelope; the fetched config overrides only what it
+    // specifies (V-speeds, SFC, etc.). Matching fallbacks live in scorer.js/score-panel.js.
+    const defaults = {
+        chtCaution: 420, chtDanger: 450, egtDanger: 1650,
+        egtSpreadCaution: 100, egtSpreadDanger: 140, chtRocLimit: 60,
         oilTempMin: 100, oilTempMax: 245,
         vnoKias: 165, vneKias: 202, vs1Kias: 50, vrefKias: 65,
         typicalSfc: 0.42,
     };
+    try {
+        const r = await fetch('http://192.168.1.77:8090/aircraft-config.json',
+            { signal: AbortSignal.timeout(2000) });
+        if (r.ok) return { ...defaults, ...(await r.json()) };
+    } catch (_) {}
+    return defaults;
 }
 
 async function fetchMETARs(fd) {

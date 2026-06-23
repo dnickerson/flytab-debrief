@@ -70,7 +70,13 @@ export function scoreEngineMgmt(fd, thr) {
             return vals.length > 1 ? Math.max(...vals) - Math.min(...vals) : 0;
         });
         const mean = avg(spreads);
-        egtScore = mean <= 50 ? 100 : mean <= 100 ? clamp(100 - (mean - 50)) : 0;
+        // EGT-spread envelope for N194JT (carbureted O-360-A1A), data-derived from
+        // 37 flights: cruise spread median 63°F, p95 99°F, p99 116°F, max 139°F.
+        // The old 50/100°F band flagged ~75% of normal flights.
+        const egtC = thr.egtSpreadCaution ?? 100, egtD = thr.egtSpreadDanger ?? 140;
+        egtScore = mean <= egtC ? 100
+                 : mean >= egtD ? 0
+                 : clamp(100 - (mean - egtC) * (100 / (egtD - egtC)));
     }
 
     // Mixture: % cruise rows with defined condition; red box = hard floor 20
@@ -109,13 +115,16 @@ export function scoreEngineMgmt(fd, thr) {
         }
     }
 
-    // CHT ROC: deduct when any cylinder exceeds 50°F/min at >65% power
+    // CHT ROC: deduct when any cylinder exceeds the limit at >65% power.
+    // Data-derived (37 flights, RPM>2300): |ROC| median 0, p95 27, p99 53°F/min.
+    // Climb heating up to ~55°F/min is normal; 60 flags only the genuine top ~0.5%.
+    const rocLim = thr.chtRocLimit ?? 60;
     let chtRocScore = 100;
     if (fd.chtRoc) {
         for (let i = 0; i < n; i++) {
             if (fd.pctPower[i] <= 65) continue;
             for (let c = 0; c < 4; c++) {
-                const excess = Math.abs(fd.chtRoc[c][i]) - 50;
+                const excess = Math.abs(fd.chtRoc[c][i]) - rocLim;
                 if (excess > 0) chtRocScore -= excess * 0.05;
             }
         }
@@ -260,7 +269,7 @@ export function scorePhases(fd, thr, trafficData) {
         let chtOk = 0;
         for (let i = seg.startIdx; i <= seg.endIdx; i++) {
             const maxCht = Math.max(fd.cht[0][i], fd.cht[1][i], fd.cht[2][i], fd.cht[3][i]);
-            if (maxCht <= (thr.chtCaution || 380)) chtOk++;
+            if (maxCht <= (thr.chtCaution ?? 420)) chtOk++;
         }
         const chtScore = clamp((chtOk / n) * 100);
 

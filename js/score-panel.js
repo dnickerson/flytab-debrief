@@ -25,8 +25,13 @@ export function seek(rowIdx) {
         : '--:--:--Z';
 
     const thr = _thr || {};
-    const chtCaution = thr.chtCaution || 380;
-    const chtDanger  = thr.chtDanger  || 435;
+    // Engine envelope for N194JT (O-360-A1A), data-derived from 37 flights.
+    // 380°F is this engine's CHT *optimal*, not a caution; max CHT ever seen is 402°F.
+    const chtCaution = thr.chtCaution ?? 420;
+    const chtDanger  = thr.chtDanger  ?? 450;
+    const egtSpreadC = thr.egtSpreadCaution ?? 100;  // cruise p95 ≈ 99°F
+    const egtSpreadD = thr.egtSpreadDanger  ?? 140;  // cruise max ≈ 139°F
+    const rocLim     = thr.chtRocLimit ?? 60;        // |ROC| p99 ≈ 53°F/min
     const vno = thr.vnoKias || 165;
     const vne = thr.vneKias || 202;
 
@@ -48,10 +53,10 @@ export function seek(rowIdx) {
         ? Math.max(...[0,1,2,3].map(c => Math.abs(_fd.chtRoc[c][rowIdx])))
         : 0;
     const rocActive = _fd.pctPower[rowIdx] > 65;
-    const rocStatus = (rocActive && maxRoc > 50) ? 'warn' : 'pass';
+    const rocStatus = (rocActive && maxRoc > rocLim) ? 'warn' : 'pass';
 
     const egtSpread = _egtSpread(rowIdx);
-    const egtStatus = egtSpread > 100 ? 'fail' : egtSpread > 50 ? 'warn' : 'pass';
+    const egtStatus = egtSpread > egtSpreadD ? 'fail' : egtSpread > egtSpreadC ? 'warn' : 'pass';
 
     const opCond   = _fd.opCondition[rowIdx] || '';
     const mixStatus = opCond ? 'pass' : (phaseName === 'cruise' ? 'warn' : 'pass');
@@ -96,8 +101,8 @@ export function seek(rowIdx) {
 
         <div class="sp-section-title">ENGINE</div>
         ${_row(`CHT${hotCyl+1}`, `${maxCht.toFixed(0)}°F`, chtStatus, chtStatus !== 'pass' ? `>${chtCaution}` : '')}
-        ${_fd.chtRoc ? _row('CHT ROC', `${maxRoc.toFixed(0)}°F/min`, rocStatus, rocActive && rocStatus !== 'pass' ? '>50°/min' : '') : ''}
-        ${_row('EGT spread', `${egtSpread.toFixed(0)}°F`, egtStatus, egtStatus !== 'pass' ? '>50°F' : '')}
+        ${_fd.chtRoc ? _row('CHT ROC', `${maxRoc.toFixed(0)}°F/min`, rocStatus, rocActive && rocStatus !== 'pass' ? `>${rocLim}°/min` : '') : ''}
+        ${_row('EGT spread', `${egtSpread.toFixed(0)}°F`, egtStatus, egtStatus !== 'pass' ? `>${egtSpreadC}°F` : '')}
         ${_row('Mixture', opCond || '—', mixStatus, '')}
         ${oilTemp > 0 ? _row('Oil temp', `${oilTemp.toFixed(0)}°F`, oilStatus, '') : ''}
 

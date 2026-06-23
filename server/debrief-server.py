@@ -313,6 +313,10 @@ class Handler(BaseHTTPRequestHandler):
         data = fp.read_bytes()
         self.send_response(200)
         self.send_header('Content-Type', ct or 'application/octet-stream')
+        # No-store on static assets: this is an actively-edited personal tool, and the
+        # browser was caching stale ES modules (no ETag/Last-Modified from BaseHTTPRequestHandler),
+        # so JS edits silently failed to appear until a manual hard refresh.
+        self.send_header('Cache-Control', 'no-store, must-revalidate')
         self._cors(); self.end_headers()
         self.wfile.write(data)
 
